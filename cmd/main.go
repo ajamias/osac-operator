@@ -119,22 +119,6 @@ func parsePollInterval(envVar string, defaultInterval time.Duration) time.Durati
 	return interval
 }
 
-// parseBoolEnv parses a boolean from environment variable with fallback to default.
-// It accepts "1", "t", "T", "true", "TRUE", "True" as true and "0", "f", "F", "false", "FALSE", "False" as false.
-func parseBoolEnv(envVar string, defaultValue bool) bool {
-	valueStr := os.Getenv(envVar)
-	if valueStr == "" {
-		return defaultValue
-	}
-	value, err := strconv.ParseBool(valueStr)
-	if err != nil {
-		setupLog.Error(err, "invalid boolean value, using default",
-			"envVar", envVar, "value", valueStr, "default", defaultValue)
-		return defaultValue
-	}
-	return value
-}
-
 // parseIntEnv parses an integer from environment variable with fallback to default.
 func parseIntEnv(envVar string, defaultValue int) int {
 	valueStr := os.Getenv(envVar)
@@ -369,7 +353,7 @@ func setupComputeInstanceControllers(
 	aapToken := os.Getenv(envAAPToken)
 	provisionTemplate := os.Getenv(envAAPProvisionTemplate)
 	deprovisionTemplate := os.Getenv(envAAPDeprovisionTemplate)
-	aapInsecureSkipVerify := parseBoolEnv(envAAPInsecureSkipVerify, false)
+	aapInsecureSkipVerify := helpers.GetEnvWithDefault(envAAPInsecureSkipVerify, false)
 	providerType := provisioning.ProviderType(providerTypeStr)
 	if providerType == "" {
 		providerType = provisioning.ProviderTypeEDA
