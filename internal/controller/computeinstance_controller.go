@@ -291,13 +291,17 @@ func (r *ComputeInstanceReconciler) mapObjectToComputeInstance(ctx context.Conte
 }
 
 func (r *ComputeInstanceReconciler) mapTenantToComputeInstances(ctx context.Context, obj client.Object) []reconcile.Request {
+	log := ctrllog.FromContext(ctx)
+
 	// Get all compute instances matching the tenant reference
+	annotationKey := fmt.Sprintf("metadata.annotations.%s", osacTenantAnnotation)
 	computeInstances := &v1alpha1.ComputeInstanceList{}
 	err := r.List(ctx,
 		computeInstances,
-		client.InNamespace(r.TenantNamespace),
-		client.MatchingFields{osacTenantAnnotation: obj.GetName()})
+		client.InNamespace(r.ComputeInstanceNamespace),
+		client.MatchingFields{annotationKey: obj.GetName()})
 	if err != nil {
+		log.Error(err, "failed to list compute instances", "annotationKey", annotationKey, "tenant", obj.GetName())
 		return nil
 	}
 
@@ -310,6 +314,13 @@ func (r *ComputeInstanceReconciler) mapTenantToComputeInstances(ctx context.Cont
 			},
 		})
 	}
+
+	log.Info("mapped change notification",
+		"kind", obj.GetObjectKind().GroupVersionKind().Kind,
+		"namespace", obj.GetNamespace(),
+		"name", obj.GetName(),
+		"computeinstances", computeInstances.Items,
+	)
 	return requests
 }
 

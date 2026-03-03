@@ -35,7 +35,7 @@ var ErrTenantBeingDeleted = errors.New("tenant is being deleted")
 func (r *ComputeInstanceReconciler) getTenant(ctx context.Context, instance *v1alpha1.ComputeInstance) (*v1alpha1.Tenant, error) {
 	tenantName, exists := instance.GetAnnotations()[osacTenantAnnotation]
 	if !exists || tenantName == "" {
-		return nil, fmt.Errorf("tenant name %s not found", tenantName)
+		return nil, fmt.Errorf("tenant information for compute instance %s not found", instance.GetName())
 	}
 
 	tenant := &v1alpha1.Tenant{}
