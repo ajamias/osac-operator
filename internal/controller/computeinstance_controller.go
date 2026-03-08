@@ -361,9 +361,9 @@ func (r *ComputeInstanceReconciler) handleProvisioning(ctx context.Context, inst
 	}
 
 	// Check if we need to trigger a (new) provision job
-	latestProvisionJob := v1alpha1.FindLatestJobByType(instance.Status.Jobs, v1alpha1.JobTypeProvision)
+	triggerProvision, latestProvisionJob := r.shouldTriggerProvision(ctx, instance)
 
-	if r.needsProvisionJob(instance, latestProvisionJob) {
+	if triggerProvision {
 		log.Info("triggering provisioning", "provider", r.ProvisioningProvider.Name())
 		result, err := r.ProvisioningProvider.TriggerProvision(ctx, instance)
 		if err != nil {
@@ -928,16 +928,34 @@ func determinePhaseFromPrintableStatus(ctx context.Context, kv *kubevirtv1.Virtu
 	}
 }
 
-// needsProvisionJob returns true when we should trigger a new provision job.
-// This is the case when no job exists yet, or when the spec has changed since the last successful provision.
-func (r *ComputeInstanceReconciler) needsProvisionJob(instance *v1alpha1.ComputeInstance, latestJob *v1alpha1.JobStatus) bool {
+// shouldTriggerProvision determines whether a new provision job should be triggered.
+// Returns true and nil when provisioning is needed (no job exists or spec changed since last successful provision).
+// Returns false and the latest provision job when provisioning should be skipped (job is in progress or spec unchanged).
+// When the cached instance shows no job, it reads fresh from the API server to prevent duplicate
+// triggers caused by stale informer cache reads between back-to-back reconciles.
+func (r *ComputeInstanceReconciler) shouldTriggerProvision(ctx context.Context, instance *v1alpha1.ComputeInstance) (bool, *v1alpha1.JobStatus) {
+	log := ctrllog.FromContext(ctx)
+	latestJob := v1alpha1.FindLatestJobByType(instance.Status.Jobs, v1alpha1.JobTypeProvision)
+
 	if latestJob == nil || latestJob.JobID == "" {
-		return true
+		fresh := &v1alpha1.ComputeInstance{}
+		if err := r.mgr.GetLocalManager().GetAPIReader().Get(ctx, client.ObjectKeyFromObject(instance), fresh); err == nil {
+			freshJob := v1alpha1.FindLatestJobByType(fresh.Status.Jobs, v1alpha1.JobTypeProvision)
+			if freshJob != nil && freshJob.JobID != "" && !freshJob.State.IsTerminal() {
+				log.Info("skipping provision trigger: non-terminal job found via API server", "jobID", freshJob.JobID, "state", freshJob.State)
+				instance.Status.Jobs = fresh.Status.Jobs
+				return false, freshJob
+			}
+		}
+		return true, nil
 	}
 	if !latestJob.State.IsTerminal() {
-		return false
+		return false, latestJob
 	}
-	return instance.Status.DesiredConfigVersion != instance.Status.ReconciledConfigVersion
+	if instance.Status.DesiredConfigVersion != instance.Status.ReconciledConfigVersion {
+		return true, latestJob
+	}
+	return false, latestJob
 }
 
 // handleDesiredConfigVersion computes a version (hash) of the spec (using FNV-1a) and stores it as hexadecimal in status.DesiredConfigVersion.
