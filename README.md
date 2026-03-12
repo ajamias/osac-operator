@@ -51,12 +51,12 @@ into the manager deployment). The following are supported:
 The operator supports two providers: **EDA** (webhooks) and **AAP** (Ansible
 Automation Platform).
 
-**Provider selection** - `OSAC_PROVISIONING_PROVIDER` — `"eda"` (default) or
-`"aap"`.
+**Provider selection:** 
+`OSAC_PROVISIONING_PROVIDER` — `"eda"` (default) or `"aap"`.
 
-**EDA provider (default)** - `OSAC_COMPUTE_INSTANCE_PROVISION_WEBHOOK` — webhook
-URL for provisioning. - `OSAC_COMPUTE_INSTANCE_DEPROVISION_WEBHOOK` — webhook
-URL for deprovisioning.
+**EDA provider (default):** 
+-`OSAC_COMPUTE_INSTANCE_PROVISION_WEBHOOK` — webhook URL for provisioning. 
+- `OSAC_COMPUTE_INSTANCE_DEPROVISION_WEBHOOK` — webhook URL for deprovisioning.
 
 **AAP provider** - `OSAC_AAP_URL` — AAP server URL (required when using AAP). -
 `OSAC_AAP_TOKEN` — AAP authentication token (required when using AAP). -
