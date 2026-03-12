@@ -15,29 +15,66 @@ OSAC operator is part of the [Open Sovereign AI Cloud (OSAC)][osac-project] proj
 
 ## Configuration
 
-OSAC operator makes use of the following environment variables:
+Configuration is supplied via environment variables (e.g. from a Secret mounted into the manager deployment). The following are supported:
 
-### Cluster Provisioning
-- `OSAC_CLUSTER_CREATE_WEBHOOK` -- the operator will post the JSON-serialized ClusterOrder to this URL after creating the target namespace, service account, and rolebinding.
-- `OSAC_CLUSTER_DELETE_WEBHOOK` -- the operator will post the JSON-serialized ClusterOrder to this URL before deleting the target namespace.
+### Cluster provisioning
+- `OSAC_CLUSTER_CREATE_WEBHOOK` — URL to POST the JSON-serialized ClusterOrder after creating the target namespace, service account, and rolebinding.
+- `OSAC_CLUSTER_DELETE_WEBHOOK` — URL to POST the JSON-serialized ClusterOrder before deleting the target namespace.
+- `OSAC_CLUSTER_ORDER_NAMESPACE` — namespace to watch for ClusterOrder resources (optional).
 
-### ComputeInstance Provisioning
+### HostPool provisioning
+- `OSAC_HOSTPOOL_CREATE_WEBHOOK` — URL to POST when a HostPool’s namespace is created.
+- `OSAC_HOSTPOOL_DELETE_WEBHOOK` — URL to POST before deleting the HostPool namespace.
+- `OSAC_HOSTPOOL_ORDER_NAMESPACE` — namespace to watch for HostPool resources (optional).
 
-The operator supports two provisioning providers for ComputeInstance resources:
+### ComputeInstance provisioning
 
-**Provider Selection:**
-- `OSAC_PROVISIONING_PROVIDER` -- selects the provider: `"eda"` (default) or `"aap"`
+The operator supports two providers: **EDA** (webhooks) and **AAP** (Ansible Automation Platform).
 
-**EDA Provider (default):**
-- `OSAC_COMPUTE_INSTANCE_PROVISION_WEBHOOK` -- webhook URL for provisioning
-- `OSAC_COMPUTE_INSTANCE_DEPROVISION_WEBHOOK` -- webhook URL for deprovisioning
+**Provider selection**
+- `OSAC_PROVISIONING_PROVIDER` — `"eda"` (default) or `"aap"`.
 
-**AAP Provider:**
-- `OSAC_AAP_URL` -- AAP server URL (required)
-- `OSAC_AAP_TOKEN` -- AAP authentication token (required)
-- `OSAC_AAP_PROVISION_TEMPLATE` -- template name for provisioning (optional)
-- `OSAC_AAP_DEPROVISION_TEMPLATE` -- template name for deprovisioning (optional)
-- `OSAC_AAP_STATUS_POLL_INTERVAL` -- job status polling interval (optional, default: 30s)
+**EDA provider (default)**
+- `OSAC_COMPUTE_INSTANCE_PROVISION_WEBHOOK` — webhook URL for provisioning.
+- `OSAC_COMPUTE_INSTANCE_DEPROVISION_WEBHOOK` — webhook URL for deprovisioning.
+
+**AAP provider**
+- `OSAC_AAP_URL` — AAP server URL (required when using AAP).
+- `OSAC_AAP_TOKEN` — AAP authentication token (required when using AAP).
+- `OSAC_AAP_PROVISION_TEMPLATE` — template name for provisioning (optional).
+- `OSAC_AAP_DEPROVISION_TEMPLATE` — template name for deprovisioning (optional).
+- `OSAC_AAP_STATUS_POLL_INTERVAL` — job status polling interval (optional, default: 30s). Duration strings e.g. `30s`, `1m`.
+- `OSAC_AAP_INSECURE_SKIP_VERIFY` — skip TLS verification for AAP (optional, default: false). Set to a truthy value to enable.
+
+**Namespaces and remote cluster**
+- `OSAC_COMPUTE_INSTANCE_NAMESPACE` — namespace for ComputeInstance resources (optional).
+- `OSAC_TENANT_NAMESPACE` — namespace for Tenant resources (optional).
+- `OSAC_REMOTE_CLUSTER_KUBECONFIG` — path to kubeconfig for the remote cluster used by tenant and compute-instance controllers (optional). Not supported when cluster or host-pool controllers are enabled.
+
+### Networking (VirtualNetwork, Subnet, SecurityGroup)
+
+Networking controllers use AAP only (no EDA webhook support).
+
+- `OSAC_NETWORKING_NAMESPACE` — namespace for networking resources (optional).
+- AAP-related variables above (`OSAC_AAP_URL`, `OSAC_AAP_TOKEN`, etc.) apply when using networking controllers.
+
+### Job history
+- `OSAC_MAX_JOB_HISTORY` — maximum number of job history entries to retain (optional).
+
+### Fulfillment service (gRPC)
+- `OSAC_FULFILLMENT_SERVER_ADDRESS` — fulfillment service gRPC address (e.g. `fulfillment-service:50051`).
+- `OSAC_FULFILLMENT_TOKEN_FILE` — path to file containing the gRPC auth token.
+- `OSAC_MINIMUM_REQUEST_INTERVAL` — minimum duration between calls to the same webhook URL (optional). Duration string, default: 0.
+
+### Controller enable flags
+
+Each controller can be enabled or disabled. If none of these are set, all controllers are enabled.
+
+- `OSAC_ENABLE_TENANT_CONTROLLER` — enable Tenant controller (truthy/falsy).
+- `OSAC_ENABLE_HOST_POOL_CONTROLLER` — enable HostPool controller (truthy/falsy).
+- `OSAC_ENABLE_COMPUTE_INSTANCE_CONTROLLER` — enable ComputeInstance controller (truthy/falsy).
+- `OSAC_ENABLE_CLUSTER_CONTROLLER` — enable ClusterOrder controller (truthy/falsy).
+- `OSAC_ENABLE_NETWORKING_CONTROLLER` — enable networking controllers (truthy/falsy).
 
 See `config/samples/osac-config-secret.yaml` for a complete configuration example.
 
