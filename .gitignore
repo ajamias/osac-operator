@@ -5,6 +5,7 @@
 *.so
 *.dylib
 bin/*
+main
 Dockerfile.cross
 Dockerfile.manifests
 dist/

@@ -54,7 +54,10 @@ rules:
   - clusterorders
   - computeinstances
   - hostpools
+  - securitygroups
+  - subnets
   - tenants
+  - virtualnetworks
   verbs:
   - create
   - delete
@@ -69,7 +72,10 @@ rules:
   - clusterorders/finalizers
   - computeinstances/finalizers
   - hostpools/finalizers
+  - securitygroups/finalizers
+  - subnets/finalizers
   - tenants/finalizers
+  - virtualnetworks/finalizers
   verbs:
   - update
 - apiGroups:
@@ -78,7 +84,10 @@ rules:
   - clusterorders/status
   - computeinstances/status
   - hostpools/status
+  - securitygroups/status
+  - subnets/status
   - tenants/status
+  - virtualnetworks/status
   verbs:
   - get
   - patch

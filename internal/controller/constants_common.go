@@ -28,4 +28,9 @@ const (
 
 	// osacPrefix is the prefix used to identify osac resources
 	osacPrefix string = "osac.openshift.io"
+
+	// osacImplementationStrategyAnnotation is the annotation key for the network implementation strategy.
+	// This is derived from the NetworkClass and used by AAP playbooks to select the appropriate role
+	// (e.g., "cudn" -> cudn_virtual_network or cudn_subnet role).
+	osacImplementationStrategyAnnotation = osacPrefix + "/implementation-strategy"
 )

@@ -68,8 +68,9 @@ var (
 )
 
 const (
-	// EDA webhook environment variables
+	// Namespace environment variables
 	envComputeInstanceNamespace          = "OSAC_COMPUTE_INSTANCE_NAMESPACE"
+	envNetworkingNamespace               = "OSAC_NETWORKING_NAMESPACE"
 	envComputeInstanceProvisionWebhook   = "OSAC_COMPUTE_INSTANCE_PROVISION_WEBHOOK"
 	envComputeInstanceDeprovisionWebhook = "OSAC_COMPUTE_INSTANCE_DEPROVISION_WEBHOOK"
 
@@ -98,6 +99,7 @@ const (
 	envEnableHostPoolController        = "OSAC_ENABLE_HOST_POOL_CONTROLLER"
 	envEnableComputeInstanceController = "OSAC_ENABLE_COMPUTE_INSTANCE_CONTROLLER"
 	envEnableClusterController         = "OSAC_ENABLE_CLUSTER_CONTROLLER"
+	envEnableNetworkingController      = "OSAC_ENABLE_NETWORKING_CONTROLLER"
 
 	remoteClusterName = "remote"
 )
@@ -142,11 +144,54 @@ func parseIntEnv(envVar string, defaultValue int) int {
 	return value
 }
 
+// controllerFlags holds the enable flags for all controllers.
+type controllerFlags struct {
+	Tenant          bool
+	HostPool        bool
+	ComputeInstance bool
+	Cluster         bool
+	Networking      bool
+}
+
+// registerControllerFlags registers controller enable flags with the flag package
+// and returns a function that should be called after flag.Parse() to get the final values.
+func registerControllerFlags() *controllerFlags {
+	flags := &controllerFlags{}
+	flag.BoolVar(&flags.Tenant, "enable-tenant-controller",
+		helpers.GetEnvWithDefault(envEnableTenantController, false),
+		"Enable the tenant controller.")
+	flag.BoolVar(&flags.HostPool, "enable-host-pool-controller",
+		helpers.GetEnvWithDefault(envEnableHostPoolController, false),
+		"Enable the host-pool controller.")
+	flag.BoolVar(&flags.ComputeInstance, "enable-compute-instance-controller",
+		helpers.GetEnvWithDefault(envEnableComputeInstanceController, false),
+		"Enable the compute-instance controller.")
+	flag.BoolVar(&flags.Cluster, "enable-cluster-controller",
+		helpers.GetEnvWithDefault(envEnableClusterController, false),
+		"Enable the cluster controller.")
+	flag.BoolVar(&flags.Networking, "enable-networking-controller",
+		helpers.GetEnvWithDefault(envEnableNetworkingController, false),
+		"Enable the networking controllers (VirtualNetwork, Subnet, SecurityGroup).")
+	return flags
+}
+
+// enableAllIfNoneSet enables all controllers if none are explicitly enabled.
+func (f *controllerFlags) enableAllIfNoneSet() {
+	if !f.Tenant && !f.HostPool && !f.ComputeInstance && !f.Cluster && !f.Networking {
+		f.Tenant = true
+		f.HostPool = true
+		f.ComputeInstance = true
+		f.Cluster = true
+		f.Networking = true
+		setupLog.Info("no controller flags set, enabling all controllers")
+	}
+}
+
 // addSchemesForLocalControllers registers only the API schemes required by the enabled controllers.
 // Must be called before creating the manager.
 func addSchemesForLocalControllers(
 	localScheme *runtime.Scheme,
-	enableCluster, enableHostPool, enableComputeInstance, enableTenant bool,
+	enableCluster, enableHostPool, enableComputeInstance, enableTenant, enableNetworking bool,
 ) {
 	utilruntime.Must(clientgoscheme.AddToScheme(localScheme))
 	utilruntime.Must(v1alpha1.AddToScheme(localScheme))
@@ -410,6 +455,93 @@ func setupTenantController(mgr mcmanager.Manager) error {
 	return nil
 }
 
+// setupNetworkingControllers registers the VirtualNetwork, Subnet, and SecurityGroup controllers
+// along with their feedback controllers when grpcConn is set.
+func setupNetworkingControllers(
+	mgr mcmanager.Manager,
+	grpcConn *grpc.ClientConn,
+	maxJobHistory int,
+) error {
+	localMgr := mgr.GetLocalManager()
+
+	// Get namespace from environment (single namespace for all networking resources)
+	networkingNamespace := os.Getenv(envNetworkingNamespace)
+
+	// Get provider configuration
+	aapURL := os.Getenv(envAAPURL)
+	aapToken := os.Getenv(envAAPToken)
+	provisionTemplate := os.Getenv(envAAPProvisionTemplate)
+	deprovisionTemplate := os.Getenv(envAAPDeprovisionTemplate)
+	aapInsecureSkipVerify := helpers.GetEnvWithDefault(envAAPInsecureSkipVerify, false)
+
+	// Create provider (AAP only for networking - no EDA webhook support)
+	networkingProvider, statusPollInterval, err := createAAPProvider(
+		aapURL, aapToken, provisionTemplate, deprovisionTemplate,
+		aapInsecureSkipVerify,
+	)
+	if err != nil {
+		return fmt.Errorf("create networking provisioning provider: %w", err)
+	}
+
+	// Setup VirtualNetwork controller and feedback
+	if grpcConn != nil {
+		if err := controller.NewVirtualNetworkFeedbackReconciler(
+			localMgr.GetClient(),
+			grpcConn,
+			networkingNamespace,
+		).SetupWithManager(localMgr); err != nil {
+			return fmt.Errorf("virtualnetwork feedback controller: %w", err)
+		}
+	}
+
+	if err := (&controller.VirtualNetworkReconciler{
+		Client:               localMgr.GetClient(),
+		Scheme:               localMgr.GetScheme(),
+		NetworkingNamespace:  networkingNamespace,
+		ProvisioningProvider: networkingProvider,
+		StatusPollInterval:   statusPollInterval,
+		MaxJobHistory:        maxJobHistory,
+	}).SetupWithManager(localMgr); err != nil {
+		return fmt.Errorf("virtualnetwork controller: %w", err)
+	}
+
+	// Setup Subnet controller and feedback
+	if grpcConn != nil {
+		if err := controller.NewSubnetFeedbackReconciler(
+			localMgr.GetClient(),
+			grpcConn,
+			networkingNamespace,
+		).SetupWithManager(localMgr); err != nil {
+			return fmt.Errorf("subnet feedback controller: %w", err)
+		}
+	}
+
+	if err := (&controller.SubnetReconciler{
+		Client:               localMgr.GetClient(),
+		Scheme:               localMgr.GetScheme(),
+		NetworkingNamespace:  networkingNamespace,
+		ProvisioningProvider: networkingProvider,
+		StatusPollInterval:   statusPollInterval,
+		MaxJobHistory:        maxJobHistory,
+	}).SetupWithManager(localMgr); err != nil {
+		return fmt.Errorf("subnet controller: %w", err)
+	}
+
+	// Setup SecurityGroup controller (no feedback controller yet)
+	if err := (&controller.SecurityGroupReconciler{
+		Client:               localMgr.GetClient(),
+		Scheme:               localMgr.GetScheme(),
+		NetworkingNamespace:  networkingNamespace,
+		ProvisioningProvider: networkingProvider,
+		StatusPollInterval:   statusPollInterval,
+		MaxJobHistory:        maxJobHistory,
+	}).SetupWithManager(localMgr); err != nil {
+		return fmt.Errorf("securitygroup controller: %w", err)
+	}
+
+	return nil
+}
+
 func main() {
 	var err error
 
@@ -472,40 +604,16 @@ func main() {
 	)
 
 	// Controller enable flags. Defaults from env; if none are set (flag or env), all controllers are enabled.
-	var enableTenantController bool
-	var enableHostPoolController bool
-	var enableComputeInstanceController bool
-	var enableClusterController bool
-	flag.BoolVar(&enableTenantController, "enable-tenant-controller",
-		helpers.GetEnvWithDefault(envEnableTenantController, false),
-		"Enable the tenant controller.")
-	flag.BoolVar(&enableHostPoolController, "enable-host-pool-controller",
-		helpers.GetEnvWithDefault(envEnableHostPoolController, false),
-		"Enable the host-pool controller.")
-	flag.BoolVar(&enableComputeInstanceController, "enable-compute-instance-controller",
-		helpers.GetEnvWithDefault(envEnableComputeInstanceController, false),
-		"Enable the compute-instance controller.")
-	flag.BoolVar(&enableClusterController, "enable-cluster-controller",
-		helpers.GetEnvWithDefault(envEnableClusterController, false),
-		"Enable the cluster controller.")
+	ctrlFlags := registerControllerFlags()
 	opts := zap.Options{
 		Development: true,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	if !enableTenantController &&
-		!enableHostPoolController &&
-		!enableComputeInstanceController &&
-		!enableClusterController {
-		enableTenantController = true
-		enableHostPoolController = true
-		enableComputeInstanceController = true
-		enableClusterController = true
-		setupLog.Info("no controller flags set, enabling all controllers")
-	}
+	ctrlFlags.enableAllIfNoneSet()
 
-	if remoteClusterKubeconfig != "" && (enableHostPoolController || enableClusterController) {
+	if remoteClusterKubeconfig != "" && (ctrlFlags.HostPool || ctrlFlags.Cluster) {
 		setupLog.Error(nil, "remote cluster kubeconfig option is not supported along with host-pool and cluster controllers")
 		os.Exit(1)
 	}
@@ -563,16 +671,17 @@ func main() {
 	if remoteClusterKubeconfig == "" {
 		localScheme = runtime.NewScheme()
 		addSchemesForLocalControllers(localScheme,
-			enableClusterController,
-			enableHostPoolController,
-			enableComputeInstanceController,
-			enableTenantController,
+			ctrlFlags.Cluster,
+			ctrlFlags.HostPool,
+			ctrlFlags.ComputeInstance,
+			ctrlFlags.Tenant,
+			ctrlFlags.Networking,
 		)
 	} else {
 		remoteScheme = runtime.NewScheme()
 		addSchemesForRemoteControllers(localScheme, remoteScheme,
-			enableComputeInstanceController,
-			enableTenantController,
+			ctrlFlags.ComputeInstance,
+			ctrlFlags.Tenant,
 		)
 		remoteCluster, err = newClusterFromKubeconfig(remoteClusterKubeconfig, remoteScheme)
 		if err != nil {
@@ -606,6 +715,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create the gRPC connection:
 	var grpcConn *grpc.ClientConn
 	if fulfillmentServerAddress != "" {
 		setupLog.Info("gRPC connection to fulfillment service is enabled")
@@ -622,27 +732,33 @@ func main() {
 	maxJobHistory := parseIntEnv(envMaxJobHistory, controller.DefaultMaxJobHistory)
 	setupLog.Info("job history configuration", "maxJobs", maxJobHistory)
 
-	if enableClusterController {
+	if ctrlFlags.Cluster {
 		if err := setupClusterControllers(mgr, grpcConn, minimumRequestInterval); err != nil {
 			setupLog.Error(err, "unable to setup cluster controllers")
 			os.Exit(1)
 		}
 	}
-	if enableHostPoolController {
+	if ctrlFlags.HostPool {
 		if err := setupHostPoolControllers(mgr, grpcConn, minimumRequestInterval); err != nil {
 			setupLog.Error(err, "unable to setup hostpool controllers")
 			os.Exit(1)
 		}
 	}
-	if enableComputeInstanceController {
+	if ctrlFlags.ComputeInstance {
 		if err := setupComputeInstanceControllers(mgr, grpcConn, minimumRequestInterval, maxJobHistory); err != nil {
 			setupLog.Error(err, "unable to setup computeinstance controllers")
 			os.Exit(1)
 		}
 	}
-	if enableTenantController {
+	if ctrlFlags.Tenant {
 		if err := setupTenantController(mgr); err != nil {
 			setupLog.Error(err, "unable to setup tenant controller")
+			os.Exit(1)
+		}
+	}
+	if ctrlFlags.Networking {
+		if err := setupNetworkingControllers(mgr, grpcConn, maxJobHistory); err != nil {
+			setupLog.Error(err, "unable to setup networking controllers")
 			os.Exit(1)
 		}
 	}

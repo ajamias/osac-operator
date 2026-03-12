@@ -72,6 +72,8 @@ spec:
               name: osac-config
               optional: true
         env:
+          - name: OSAC_PROVISIONING_PROVIDER
+            value: "aap"
           - name: OSAC_CLUSTER_ORDER_NAMESPACE
             valueFrom:
               fieldRef:
@@ -85,6 +87,10 @@ spec:
               fieldRef:
                 fieldPath: metadata.namespace
           - name: OSAC_TENANT_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: OSAC_NETWORKING_NAMESPACE
             valueFrom:
               fieldRef:
                 fieldPath: metadata.namespace
