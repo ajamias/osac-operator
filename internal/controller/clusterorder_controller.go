@@ -543,7 +543,7 @@ func (r *ClusterOrderReconciler) handleProvisioning(ctx context.Context, instanc
 			Type:      v1alpha1.JobTypeProvision,
 			State:     result.InitialState,
 			Message:   result.Message,
-			Timestamp: metav1.Now(),
+			Timestamp: metav1.NewTime(time.Now().UTC()),
 		}, r.MaxJobHistory)
 
 		// Requeue to poll status
@@ -639,11 +639,12 @@ func (r *ClusterOrderReconciler) handleDeprovisioning(ctx context.Context, insta
 			}
 			// Append deprovision job
 			instance.Status.Jobs = helpers.AppendJob(instance.Status.Jobs, v1alpha1.JobStatus{
-				JobID:     result.JobID,
-				Type:      v1alpha1.JobTypeDeprovision,
-				State:     v1alpha1.JobStatePending,
-				Message:   "Deprovision job triggered",
-				Timestamp: metav1.Now(),
+				JobID:                  result.JobID,
+				Type:                   v1alpha1.JobTypeDeprovision,
+				State:                  v1alpha1.JobStatePending,
+				Message:                "Deprovision job triggered",
+				Timestamp:              metav1.NewTime(time.Now().UTC()),
+				BlockDeletionOnFailure: result.BlockDeletionOnFailure,
 			}, r.MaxJobHistory)
 			return ctrl.Result{RequeueAfter: r.StatusPollInterval}, nil
 
@@ -675,9 +676,16 @@ func (r *ClusterOrderReconciler) handleDeprovisioning(ctx context.Context, insta
 		if !status.State.IsTerminal() {
 			return ctrl.Result{RequeueAfter: r.StatusPollInterval}, nil
 		}
+
+		// Job reached terminal state
+		if !status.State.IsSuccessful() && latestDeprovisionJob.BlockDeletionOnFailure {
+			log.Info("deprovision job failed, blocking deletion to prevent orphaned resources",
+				"jobID", latestDeprovisionJob.JobID, "state", status.State)
+			return ctrl.Result{RequeueAfter: r.StatusPollInterval}, nil
+		}
 	}
 
-	// Job is terminal, ready to proceed with deletion
+	// Job is terminal and successful (or not blocking), proceed with deletion
 	return ctrl.Result{}, nil
 }
 
