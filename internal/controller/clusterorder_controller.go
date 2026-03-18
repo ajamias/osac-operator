@@ -533,6 +533,13 @@ func (r *ClusterOrderReconciler) handleDelete(ctx context.Context, _ reconcile.R
 func (r *ClusterOrderReconciler) handleProvisioning(ctx context.Context, instance *v1alpha1.ClusterOrder) (ctrl.Result, error) {
 	log := ctrllog.FromContext(ctx)
 
+	// Check for ManagementStateManual annotation
+	val, exists := instance.Annotations[osacManagementStateAnnotation]
+	if exists && val == ManagementStateManual {
+		log.Info("skipping provisioning due to management-state annotation", "management-state", val)
+		return ctrl.Result{}, nil
+	}
+
 	action, latestProvisionJob := r.shouldTriggerProvision(ctx, instance)
 	switch action {
 	case provisionSkip:
@@ -657,6 +664,13 @@ func (r *ClusterOrderReconciler) handleReconciledConfigVersion(ctx context.Conte
 // Waits for provision job termination if needed, then triggers deprovision job.
 func (r *ClusterOrderReconciler) handleDeprovisioning(ctx context.Context, instance *v1alpha1.ClusterOrder) (ctrl.Result, error) {
 	log := ctrllog.FromContext(ctx)
+
+	// Check for ManagementStateManual annotation
+	val, exists := instance.Annotations[osacManagementStateAnnotation]
+	if exists && val == ManagementStateManual {
+		log.Info("skipping deprovisioning due to management-state annotation", "management-state", val)
+		return ctrl.Result{}, nil
+	}
 
 	// Check if deprovision job already exists
 	latestDeprovisionJob := v1alpha1.FindLatestJobByType(instance.Status.Jobs, v1alpha1.JobTypeDeprovision)

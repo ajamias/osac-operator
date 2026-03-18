@@ -96,4 +96,67 @@ var _ = Describe("HostPool Controller", func() {
 			// Example: If you expect a certain status condition after reconciliation, verify it here.
 		})
 	})
+
+	Context("handleProvisioning", func() {
+		var reconciler *HostPoolReconciler
+
+		BeforeEach(func() {
+			reconciler = &HostPoolReconciler{
+				Client:               k8sClient,
+				apiReader:            k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				ProvisioningProvider: &mockProvisioningProvider{},
+			}
+		})
+
+		ctx := context.Background()
+
+		It("should skip provisioning when ManagementStateManual annotation is set", func() {
+			instance := &v1alpha1.HostPool{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						osacHostPoolManagementStateAnnotation: ManagementStateManual,
+					},
+				},
+				Status: v1alpha1.HostPoolStatus{DesiredConfigVersion: "v1"},
+			}
+
+			result, err := reconciler.handleProvisioning(ctx, instance)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeZero())
+			latestProvisionJob := v1alpha1.FindLatestJobByType(instance.Status.Jobs, v1alpha1.JobTypeProvision)
+			Expect(latestProvisionJob).To(BeNil())
+		})
+	})
+
+	Context("handleDeprovisioning", func() {
+		var reconciler *HostPoolReconciler
+
+		BeforeEach(func() {
+			reconciler = &HostPoolReconciler{
+				Client:               k8sClient,
+				apiReader:            k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				ProvisioningProvider: &mockProvisioningProvider{},
+			}
+		})
+
+		ctx := context.Background()
+
+		It("should skip deprovisioning when ManagementStateManual annotation is set", func() {
+			instance := &v1alpha1.HostPool{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						osacHostPoolManagementStateAnnotation: ManagementStateManual,
+					},
+				},
+			}
+
+			result, err := reconciler.handleDeprovisioning(ctx, instance)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeZero())
+			latestDeprovisionJob := v1alpha1.FindLatestJobByType(instance.Status.Jobs, v1alpha1.JobTypeDeprovision)
+			Expect(latestDeprovisionJob).To(BeNil())
+		})
+	})
 })
