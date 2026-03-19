@@ -705,6 +705,7 @@ func (r *ComputeInstanceReconciler) handleUpdate(ctx context.Context, _ reconcil
 			if instance.Status.LastRestartedAt == nil || instance.Spec.RestartRequestedAt.After(instance.Status.LastRestartedAt.Time) {
 				log.Info("restart completed via provisioning", "restartRequestedAt", instance.Spec.RestartRequestedAt)
 				instance.Status.LastRestartedAt = instance.Spec.RestartRequestedAt.DeepCopy()
+				instance.SetStatusCondition(v1alpha1.ComputeInstanceConditionRestartInProgress, metav1.ConditionFalse, "", v1alpha1.ReasonAsExpected)
 			}
 		}
 
@@ -722,6 +723,15 @@ func (r *ComputeInstanceReconciler) handleUpdate(ctx context.Context, _ reconcil
 	}
 
 	instance.SetStatusCondition(v1alpha1.ComputeInstanceConditionConfigurationApplied, metav1.ConditionFalse, "Applying configuration", v1alpha1.ReasonAsExpected)
+
+	// Set RestartInProgress condition when a restart is pending provisioning.
+	if instance.Spec.RestartRequestedAt != nil {
+		if instance.Status.LastRestartedAt == nil || instance.Spec.RestartRequestedAt.After(instance.Status.LastRestartedAt.Time) {
+			instance.SetStatusCondition(v1alpha1.ComputeInstanceConditionRestartInProgress, metav1.ConditionTrue,
+				fmt.Sprintf("Restart initiated at %s", instance.Spec.RestartRequestedAt.UTC().Format(time.RFC3339)),
+				"RestartInProgress")
+		}
+	}
 
 	// Handle provisioning via provider abstraction
 	return r.handleProvisioning(ctx, instance)
