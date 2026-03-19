@@ -226,6 +226,11 @@ func (r *ComputeInstanceReconciler) SetupWithManager(mgr mcmanager.Manager) erro
 			mcbuilder.WithPredicates(labelPredicate),
 		).
 		Watches(
+			&kubevirtv1.VirtualMachineInstance{},
+			mchandler.EnqueueRequestsFromMapFunc(r.mapObjectToComputeInstance),
+			mcbuilder.WithPredicates(labelPredicate),
+		).
+		Watches(
 			&v1alpha1.Tenant{},
 			mchandler.EnqueueRequestsFromMapFunc(r.mapTenantToComputeInstances),
 			mcbuilder.WithPredicates(ComputeInstanceNamespacePredicate(r.ComputeInstanceNamespace)),
