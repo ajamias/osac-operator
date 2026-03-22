@@ -548,6 +548,16 @@ func (r *ClusterOrderReconciler) handleProvisioning(ctx context.Context, instanc
 		return ctrl.Result{Requeue: true}, nil
 	case provisionTrigger:
 		return r.triggerProvisionJob(ctx, instance)
+	case provisionBackoff:
+		backoff := computeBackoffFromJobs(instance.Status.Jobs, instance.Status.DesiredConfigVersion)
+		elapsed := time.Since(latestProvisionJob.Timestamp.Time)
+		if elapsed >= backoff {
+			log.Info("backoff elapsed, retrying provision", "backoff", backoff, "elapsed", elapsed)
+			return r.triggerProvisionJob(ctx, instance)
+		}
+		remaining := backoff - elapsed
+		log.Info("provision failed, backing off", "backoff", backoff, "remaining", remaining)
+		return ctrl.Result{RequeueAfter: remaining}, nil
 	default: // provisionPoll
 		return r.pollProvisionJob(ctx, log, instance, latestProvisionJob)
 	}
@@ -621,9 +631,12 @@ func (r *ClusterOrderReconciler) shouldTriggerProvision(ctx context.Context, ins
 		// Job still running — poll for status
 		return provisionPoll, latestJob
 	} else if latestJob.ConfigVersion != "" {
-		// Terminal job with ConfigVersion — skip if same config
 		if latestJob.ConfigVersion == instance.Status.DesiredConfigVersion {
-			return provisionSkip, latestJob
+			if latestJob.State == v1alpha1.JobStateSucceeded {
+				return provisionSkip, latestJob
+			}
+			// Failed with same config — retry with backoff
+			return provisionBackoff, latestJob
 		}
 	} else if instance.Status.DesiredConfigVersion == instance.Status.ReconciledConfigVersion {
 		// Terminal job without ConfigVersion (pre-existing job) — use annotation-based check

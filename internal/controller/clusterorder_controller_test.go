@@ -228,7 +228,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 			Expect(job).NotTo(BeNil())
 		})
 
-		It("should skip when latest job failed with matching ConfigVersion", func() {
+		It("should backoff when latest job failed with matching ConfigVersion", func() {
 			instance := &v1alpha1.ClusterOrder{
 				Status: v1alpha1.ClusterOrderStatus{
 					DesiredConfigVersion: "abc123",
@@ -241,7 +241,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 				},
 			}
 			action, job := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionSkip))
+			Expect(action).To(Equal(provisionBackoff))
 			Expect(job).NotTo(BeNil())
 		})
 
