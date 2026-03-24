@@ -18,6 +18,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -25,6 +26,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -831,31 +834,48 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx := ctrl.SetupSignalHandler()
-
-	if remoteCluster != nil {
-		setupLog.Info("starting remote cluster")
-		go func() {
-			err := remoteCluster.Start(ctx)
-			if err != nil {
-				setupLog.Error(err, "unable to start remote cluster")
-				os.Exit(1)
-			}
-		}()
-	}
-	if remoteProvider != nil {
-		setupLog.Info("starting remote provider")
-		go func() {
-			if err := remoteProvider.(multicluster.ProviderRunnable).Start(ctx, mgr); err != nil {
-				setupLog.Error(err, "remote provider failed")
-			}
-		}()
-	}
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctx); err != nil {
+	if err := startComponents(ctrl.SetupSignalHandler(), remoteCluster, remoteProvider, mgr); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// startComponents runs the remote cluster, remote provider, and manager
+// concurrently using errgroup. If any component returns an error, the shared
+// context is cancelled and all other components are signaled to stop.
+// Context cancellation errors are filtered since they represent normal shutdown.
+func startComponents(
+	ctx context.Context,
+	remoteCluster cluster.Cluster,
+	remoteProvider multicluster.Provider,
+	mgr mcmanager.Manager,
+) error {
+	g, ctx := errgroup.WithContext(ctx)
+	if remoteCluster != nil {
+		g.Go(func() error {
+			return ignoreCanceled(remoteCluster.Start(ctx))
+		})
+	}
+	if remoteProvider != nil {
+		g.Go(func() error {
+			return ignoreCanceled(remoteProvider.(multicluster.ProviderRunnable).Start(ctx, mgr))
+		})
+	}
+	g.Go(func() error {
+		return ignoreCanceled(mgr.Start(ctx))
+	})
+	return g.Wait()
+}
+
+// ignoreCanceled returns nil if the error is exactly context.Canceled,
+// since that's the expected shutdown path when errgroup cancels the context.
+// Only pure cancellation is filtered — mixed/wrapped errors are preserved.
+func ignoreCanceled(err error) error {
+	if err == context.Canceled {
+		return nil
+	}
+	return err
 }
 
 //nolint:nakedret
