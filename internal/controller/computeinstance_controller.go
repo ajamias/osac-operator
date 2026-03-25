@@ -332,115 +332,43 @@ func (r *ComputeInstanceReconciler) handleProvisioning(ctx context.Context, inst
 		return ctrl.Result{}, nil
 	}
 
-	// Check if we need to trigger a (new) provision job
+	provState := &provisioning.State{
+		Jobs:                    &instance.Status.Jobs,
+		DesiredConfigVersion:    instance.Status.DesiredConfigVersion,
+		ReconciledConfigVersion: instance.Status.ReconciledConfigVersion,
+	}
 	action, latestProvisionJob := r.shouldTriggerProvision(ctx, instance)
+	trigger := func() (ctrl.Result, error) {
+		return provisioning.TriggerJob(ctx, r.ProvisioningProvider, instance, provState, r.MaxJobHistory, r.StatusPollInterval)
+	}
 
 	switch action {
 	case provisioning.Skip:
 		return ctrl.Result{}, nil
 	case provisioning.Trigger:
-		return r.triggerProvisionJob(ctx, instance)
+		return trigger()
 	case provisioning.Requeue:
+		// Use RequeueAfter (not Requeue: true) to avoid hammering the API server
 		return ctrl.Result{RequeueAfter: r.StatusPollInterval}, nil
 	case provisioning.Backoff:
-		return provisioning.HandleBackoff(ctx, instance.Status.Jobs, instance.Status.DesiredConfigVersion, latestProvisionJob, func() (ctrl.Result, error) {
-			return r.triggerProvisionJob(ctx, instance)
-		})
+		return provisioning.HandleBackoff(ctx, provState, latestProvisionJob, trigger)
 	default: // provisioning.Poll
-		return r.pollProvisionJob(ctx, instance, latestProvisionJob)
+		return provisioning.PollJob(ctx, r.ProvisioningProvider, instance, provState, latestProvisionJob, r.StatusPollInterval, &provisioning.PollCallbacks{
+			OnFailed: func(_ string) {
+				// Only set Failed phase if no VM exists yet (first-time provisioning failure).
+				// If the VM already exists (re-provisioning failure), the phase is driven by KubeVirt
+				// PrintableStatus and the failed job is visible in status.jobs.
+				if instance.Status.VirtualMachineReference == nil {
+					instance.Status.Phase = v1alpha1.ComputeInstancePhaseFailed
+				}
+			},
+			OnSuccess: func(status provisioning.ProvisionStatus) {
+				if status.ReconciledVersion != "" {
+					instance.Status.ReconciledConfigVersion = status.ReconciledVersion
+				}
+			},
+		})
 	}
-}
-
-// triggerProvisionJob triggers a new provision job and records it in the instance status.
-func (r *ComputeInstanceReconciler) triggerProvisionJob(ctx context.Context, instance *v1alpha1.ComputeInstance) (ctrl.Result, error) {
-	log := ctrllog.FromContext(ctx)
-
-	log.Info("triggering provisioning", "provider", r.ProvisioningProvider.Name())
-	result, err := r.ProvisioningProvider.TriggerProvision(ctx, instance)
-	if err != nil {
-		// Check if this is a rate limit error
-		var rateLimitErr *provisioning.RateLimitError
-		if errors.As(err, &rateLimitErr) {
-			log.Info("provisioning request rate-limited, will retry", "retryAfter", rateLimitErr.RetryAfter)
-			return ctrl.Result{RequeueAfter: rateLimitErr.RetryAfter}, nil
-		}
-
-		// Actual error - mark as failed
-		log.Error(err, "failed to trigger provisioning")
-		newJob := v1alpha1.JobStatus{
-			JobID:         "",
-			Type:          v1alpha1.JobTypeProvision,
-			Timestamp:     metav1.NewTime(time.Now().UTC()),
-			State:         v1alpha1.JobStateFailed,
-			Message:       fmt.Sprintf("Failed to trigger provisioning: %v", err),
-			ConfigVersion: instance.Status.DesiredConfigVersion,
-		}
-		instance.Status.Jobs = helpers.AppendJob(instance.Status.Jobs, newJob, r.MaxJobHistory)
-		return ctrl.Result{RequeueAfter: r.StatusPollInterval}, nil
-	}
-
-	newJob := v1alpha1.JobStatus{
-		JobID:                  result.JobID,
-		Type:                   v1alpha1.JobTypeProvision,
-		Timestamp:              metav1.NewTime(time.Now().UTC()),
-		State:                  result.InitialState,
-		Message:                result.Message,
-		BlockDeletionOnFailure: false, // Provision failures don't block deletion
-		ConfigVersion:          instance.Status.DesiredConfigVersion,
-	}
-	instance.Status.Jobs = helpers.AppendJob(instance.Status.Jobs, newJob, r.MaxJobHistory)
-	log.Info("provisioning job triggered", "jobID", result.JobID)
-	return ctrl.Result{RequeueAfter: r.StatusPollInterval}, nil
-}
-
-// pollProvisionJob checks the status of an existing provision job and updates the instance accordingly.
-func (r *ComputeInstanceReconciler) pollProvisionJob(ctx context.Context, instance *v1alpha1.ComputeInstance, latestProvisionJob *v1alpha1.JobStatus) (ctrl.Result, error) {
-	log := ctrllog.FromContext(ctx)
-
-	status, err := r.ProvisioningProvider.GetProvisionStatus(ctx, instance, latestProvisionJob.JobID)
-	if err != nil {
-		log.Error(err, "failed to get provision job status", "jobID", latestProvisionJob.JobID)
-		updatedJob := *latestProvisionJob
-		updatedJob.Message = fmt.Sprintf("Failed to get job status: %v", err)
-		helpers.UpdateJob(instance.Status.Jobs, updatedJob)
-		return ctrl.Result{RequeueAfter: r.StatusPollInterval}, nil
-	}
-
-	// Update job status
-	updatedJob := *latestProvisionJob
-	updatedJob.State = status.State
-	updatedJob.Message = status.Message
-	if status.ErrorDetails != "" {
-		updatedJob.Message = fmt.Sprintf("%s: %s", status.Message, status.ErrorDetails)
-	}
-	helpers.UpdateJob(instance.Status.Jobs, updatedJob)
-
-	// If job is still running, requeue
-	if !status.State.IsTerminal() {
-		log.Info("provision job still running", "jobID", latestProvisionJob.JobID, "state", status.State)
-		return ctrl.Result{RequeueAfter: r.StatusPollInterval}, nil
-	}
-
-	// Job is complete
-	if status.State.IsSuccessful() {
-		log.Info("provision job succeeded", "jobID", latestProvisionJob.JobID)
-		// Update reconciled version if provided
-		if status.ReconciledVersion != "" {
-			instance.Status.ReconciledConfigVersion = status.ReconciledVersion
-		}
-		return ctrl.Result{}, nil
-	}
-
-	// Job failed
-	log.Info("provision job failed", "jobID", latestProvisionJob.JobID, "message", updatedJob.Message)
-	// Only set Failed phase if no VM exists yet (first-time provisioning failure).
-	// If the VM already exists (re-provisioning failure), the phase is driven by KubeVirt
-	// PrintableStatus and reflects the actual VM power state. The failed job is visible
-	// in status.jobs and ConfigurationApplied=False indicates config is not yet applied.
-	if instance.Status.VirtualMachineReference == nil {
-		instance.Status.Phase = v1alpha1.ComputeInstancePhaseFailed
-	}
-	return ctrl.Result{}, nil
 }
 
 // handleDeprovisioning manages the deprovisioning job lifecycle for a ComputeInstance.

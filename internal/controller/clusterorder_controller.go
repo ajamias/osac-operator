@@ -557,10 +557,12 @@ func (r *ClusterOrderReconciler) handleProvisioning(ctx context.Context, instanc
 	case provisioning.Trigger:
 		return trigger()
 	case provisioning.Backoff:
-		return provisioning.HandleBackoff(ctx, *provState.Jobs, provState.DesiredConfigVersion, latestProvisionJob, trigger)
+		return provisioning.HandleBackoff(ctx, provState, latestProvisionJob, trigger)
 	default: // provisioning.Poll
-		return provisioning.PollJob(ctx, r.ProvisioningProvider, instance, provState, latestProvisionJob, r.StatusPollInterval, func(_ string) {
-			instance.Status.Phase = v1alpha1.ClusterOrderPhaseFailed
+		return provisioning.PollJob(ctx, r.ProvisioningProvider, instance, provState, latestProvisionJob, r.StatusPollInterval, &provisioning.PollCallbacks{
+			OnFailed: func(_ string) {
+				instance.Status.Phase = v1alpha1.ClusterOrderPhaseFailed
+			},
 		})
 	}
 }

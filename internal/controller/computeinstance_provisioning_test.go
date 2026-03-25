@@ -157,7 +157,7 @@ var _ = Describe("ComputeInstance Provisioning", func() {
 			Expect(latestProvisionJob).To(BeNil())
 		})
 
-		It("should handle trigger error", func() {
+		It("should propagate trigger error", func() {
 			provider := &mockProvisioningProvider{
 				triggerProvisionFunc: func(ctx context.Context, resource client.Object) (*provisioning.ProvisionResult, error) {
 					return nil, errors.New("trigger failed")
@@ -165,13 +165,9 @@ var _ = Describe("ComputeInstance Provisioning", func() {
 			}
 			reconciler.ProvisioningProvider = provider
 
-			result, err := reconciler.handleProvisioning(ctx, instance)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
-			latestProvisionJob := osacv1alpha1.FindLatestJobByType(instance.Status.Jobs, osacv1alpha1.JobTypeProvision)
-			Expect(latestProvisionJob).NotTo(BeNil())
-			Expect(latestProvisionJob.State).To(Equal(osacv1alpha1.JobStateFailed))
-			Expect(latestProvisionJob.Message).To(ContainSubstring("Failed to trigger provisioning"))
+			_, err := reconciler.handleProvisioning(ctx, instance)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("trigger failed"))
 		})
 
 		It("should poll for status when job ID exists and job is running", func() {
