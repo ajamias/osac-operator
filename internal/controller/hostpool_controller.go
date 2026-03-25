@@ -18,13 +18,9 @@ package controller
 
 import (
 	"context"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"time"
 
-	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -364,157 +360,64 @@ func (r *HostPoolReconciler) handleDelete(ctx context.Context, req reconcile.Req
 	return ctrl.Result{}, nil
 }
 
-// handleProvisioning manages the provisioning job lifecycle for HostPool.
-// Uses shouldTriggerProvision to decide action, with API server read-through guard.
+func (r *HostPoolReconciler) provisionState(instance *v1alpha1.HostPool) *provisioning.State {
+	return &provisioning.State{
+		Jobs:                    &instance.Status.Jobs,
+		DesiredConfigVersion:    instance.Status.DesiredConfigVersion,
+		ReconciledConfigVersion: instance.Status.ReconciledConfigVersion,
+	}
+}
+
 func (r *HostPoolReconciler) handleProvisioning(ctx context.Context, instance *v1alpha1.HostPool) (ctrl.Result, error) {
 	log := ctrllog.FromContext(ctx)
 
-	// Check for ManagementStateManual annotation
 	val, exists := instance.Annotations[osacHostPoolManagementStateAnnotation]
 	if exists && val == ManagementStateManual {
 		log.Info("skipping provisioning due to management-state annotation", "management-state", val)
 		return ctrl.Result{}, nil
 	}
 
+	provState := r.provisionState(instance)
 	action, latestProvisionJob := r.shouldTriggerProvision(ctx, instance)
+	trigger := func() (ctrl.Result, error) {
+		return provisioning.TriggerJob(ctx, r.ProvisioningProvider, instance, provState, r.MaxJobHistory, r.StatusPollInterval)
+	}
+
 	switch action {
-	case provisionSkip:
+	case provisioning.Skip:
 		return ctrl.Result{}, nil
-	case provisionRequeue:
+	case provisioning.Requeue:
 		return ctrl.Result{Requeue: true}, nil
-	case provisionTrigger:
-		return r.triggerProvisionJob(ctx, instance)
-	case provisionBackoff:
-		return handleProvisionBackoff(ctx, instance.Status.Jobs, instance.Status.DesiredConfigVersion, latestProvisionJob, func() (ctrl.Result, error) {
-			return r.triggerProvisionJob(ctx, instance)
-		})
-	default: // provisionPoll
-		return r.pollProvisionJob(ctx, log, instance, latestProvisionJob)
-	}
-}
-
-func (r *HostPoolReconciler) triggerProvisionJob(ctx context.Context, instance *v1alpha1.HostPool) (ctrl.Result, error) {
-	log := ctrllog.FromContext(ctx)
-	log.Info("triggering provision job")
-
-	result, err := r.ProvisioningProvider.TriggerProvision(ctx, instance)
-	if err != nil {
-		if rateLimitErr, ok := provisioning.AsRateLimitError(err); ok {
-			log.Info("provision request rate-limited, requeueing", "retryAfter", rateLimitErr.RetryAfter)
-			return ctrl.Result{RequeueAfter: rateLimitErr.RetryAfter}, nil
-		}
-		return ctrl.Result{}, fmt.Errorf("failed to trigger provision: %w", err)
-	}
-
-	instance.Status.Jobs = helpers.AppendJob(instance.Status.Jobs, v1alpha1.JobStatus{
-		JobID:         result.JobID,
-		Type:          v1alpha1.JobTypeProvision,
-		State:         result.InitialState,
-		Message:       result.Message,
-		Timestamp:     metav1.NewTime(time.Now().UTC()),
-		ConfigVersion: instance.Status.DesiredConfigVersion,
-	}, r.MaxJobHistory)
-	latestJob := v1alpha1.FindLatestJobByType(instance.Status.Jobs, v1alpha1.JobTypeProvision)
-	log.Info("provision job triggered", "jobID", latestJob.JobID, "configVersion", latestJob.ConfigVersion)
-	return ctrl.Result{RequeueAfter: r.StatusPollInterval}, nil
-}
-
-func (r *HostPoolReconciler) pollProvisionJob(ctx context.Context, log logr.Logger,
-	instance *v1alpha1.HostPool, latestProvisionJob *v1alpha1.JobStatus) (ctrl.Result, error) {
-
-	log.Info("polling provision job status", "jobID", latestProvisionJob.JobID, "currentState", latestProvisionJob.State)
-	status, err := r.ProvisioningProvider.GetProvisionStatus(ctx, instance, latestProvisionJob.JobID)
-	if err != nil {
-		log.Error(err, "failed to get provision status", "jobID", latestProvisionJob.JobID)
-		return ctrl.Result{RequeueAfter: r.StatusPollInterval}, nil
-	}
-
-	if status.State != latestProvisionJob.State || status.Message != latestProvisionJob.Message {
-		log.Info("provision job status changed", "jobID", latestProvisionJob.JobID, "oldState", latestProvisionJob.State, "newState", status.State)
-		updatedJob := *latestProvisionJob
-		updatedJob.State = status.State
-		updatedJob.Message = status.Message
-		helpers.UpdateJob(instance.Status.Jobs, updatedJob)
-
-		if status.State == v1alpha1.JobStateFailed {
-			log.Info("provision job failed", "jobID", latestProvisionJob.JobID)
-			instance.SetCondition(v1alpha1.HostPoolConditionProgressing, metav1.ConditionFalse, "ProvisionJobFailed", fmt.Sprintf("Provision job %s failed: %s", latestProvisionJob.JobID, status.Message))
+	case provisioning.Trigger:
+		return trigger()
+	case provisioning.Backoff:
+		return provisioning.HandleBackoff(ctx, *provState.Jobs, provState.DesiredConfigVersion, latestProvisionJob, trigger)
+	default: // provisioning.Poll
+		return provisioning.PollJob(ctx, r.ProvisioningProvider, instance, provState, latestProvisionJob, r.StatusPollInterval, func(message string) {
+			instance.SetCondition(v1alpha1.HostPoolConditionProgressing, metav1.ConditionFalse, "ProvisionJobFailed",
+				fmt.Sprintf("Provision job %s failed: %s", latestProvisionJob.JobID, message))
 			instance.Status.Phase = v1alpha1.HostPoolPhaseFailed
-		}
+		})
 	}
-
-	if !status.State.IsTerminal() {
-		return ctrl.Result{RequeueAfter: r.StatusPollInterval}, nil
-	}
-	return ctrl.Result{}, nil
 }
 
-// shouldTriggerProvision determines the next provisioning action.
-func (r *HostPoolReconciler) shouldTriggerProvision(ctx context.Context, instance *v1alpha1.HostPool) (provisionAction, *v1alpha1.JobStatus) {
-	latestJob := v1alpha1.FindLatestJobByType(instance.Status.Jobs, v1alpha1.JobTypeProvision)
-
-	if !hasJobID(latestJob) {
-		// No job ever ran (or trigger failed before getting a job ID) — check if config is already reconciled
-		if instance.Status.DesiredConfigVersion == instance.Status.ReconciledConfigVersion {
-			return provisionSkip, latestJob
-		}
-	} else if !latestJob.State.IsTerminal() {
-		// Job still running — poll for status
-		return provisionPoll, latestJob
-	} else if latestJob.ConfigVersion != "" {
-		if latestJob.ConfigVersion == instance.Status.DesiredConfigVersion {
-			if latestJob.State == v1alpha1.JobStateSucceeded {
-				return provisionSkip, latestJob
-			}
-			// Failed with same config — retry with backoff
-			return provisionBackoff, latestJob
-		}
-	} else if instance.Status.DesiredConfigVersion == instance.Status.ReconciledConfigVersion {
-		// Terminal job without ConfigVersion (pre-existing job) — use annotation-based check
-		return provisionSkip, latestJob
-	}
-
-	if r.checkAPIServerForNonTerminalJob(ctx, instance) {
-		return provisionRequeue, nil
-	}
-	return provisionTrigger, latestJob
-}
-
-func (r *HostPoolReconciler) checkAPIServerForNonTerminalJob(ctx context.Context, instance *v1alpha1.HostPool) bool {
-	log := ctrllog.FromContext(ctx)
-	fresh := &v1alpha1.HostPool{}
-	if err := r.apiReader.Get(ctx, client.ObjectKeyFromObject(instance), fresh); err != nil {
-		return false
-	}
-	freshJob := v1alpha1.FindLatestJobByType(fresh.Status.Jobs, v1alpha1.JobTypeProvision)
-	if hasJobID(freshJob) && !freshJob.State.IsTerminal() {
-		log.Info("skipping provision trigger: non-terminal job found via API server", "jobID", freshJob.JobID, "state", freshJob.State)
-		return true
-	}
-	return false
+func (r *HostPoolReconciler) shouldTriggerProvision(ctx context.Context, instance *v1alpha1.HostPool) (provisioning.Action, *v1alpha1.JobStatus) {
+	return provisioning.EvaluateAction(r.provisionState(instance), func() bool {
+		return provisioning.CheckAPIServerForNonTerminalProvisionJob(ctx, r.apiReader, client.ObjectKeyFromObject(instance), &v1alpha1.HostPool{})
+	})
 }
 
 func (r *HostPoolReconciler) handleDesiredConfigVersion(instance *v1alpha1.HostPool) error {
-	specJSON, err := json.Marshal(instance.Spec)
+	version, err := provisioning.ComputeDesiredConfigVersion(instance.Spec)
 	if err != nil {
-		return fmt.Errorf("failed to marshal spec to JSON: %w", err)
+		return err
 	}
-	hasher := fnv.New64a()
-	if _, err := hasher.Write(specJSON); err != nil {
-		return fmt.Errorf("failed to write to hash: %w", err)
-	}
-	instance.Status.DesiredConfigVersion = hex.EncodeToString(hasher.Sum(nil))
+	instance.Status.DesiredConfigVersion = version
 	return nil
 }
 
 func (r *HostPoolReconciler) handleReconciledConfigVersion(ctx context.Context, instance *v1alpha1.HostPool) {
-	log := ctrllog.FromContext(ctx)
-	if version, exists := instance.Annotations[osacReconciledConfigVersionAnnotation]; exists {
-		instance.Status.ReconciledConfigVersion = version
-		log.V(1).Info("copied reconciled config version from annotation", "version", version)
-	} else {
-		instance.Status.ReconciledConfigVersion = ""
-	}
+	instance.Status.ReconciledConfigVersion = provisioning.SyncReconciledConfigVersion(ctx, instance.Annotations, osacReconciledConfigVersionAnnotation)
 }
 
 // handleDeprovisioning manages the deprovisioning job lifecycle for HostPool.

@@ -27,6 +27,7 @@ import (
 
 	osacv1alpha1 "github.com/osac-project/osac-operator/api/v1alpha1"
 	"github.com/osac-project/osac-operator/internal/helpers"
+	"github.com/osac-project/osac-operator/internal/provisioning"
 )
 
 var _ = Describe("ClusterOrder Integration Tests", func() {
@@ -173,7 +174,7 @@ var _ = Describe("ClusterOrder Integration Tests", func() {
 			}
 
 			action, _ := reconciler.shouldTriggerProvision(ctx, staleInstance)
-			Expect(action).To(Equal(provisionRequeue), "should detect non-terminal job via API server and requeue")
+			Expect(action).To(Equal(provisioning.Requeue), "should detect non-terminal job via API server and requeue")
 		})
 	})
 
@@ -264,7 +265,7 @@ var _ = Describe("ClusterOrder Integration Tests", func() {
 			instance.Status.ReconciledConfigVersion = "v1"
 
 			action, _ := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionSkip))
+			Expect(action).To(Equal(provisioning.Skip))
 		})
 
 		It("should skip provisioning after config versions match even with terminal job", func() {
@@ -276,7 +277,7 @@ var _ = Describe("ClusterOrder Integration Tests", func() {
 			}
 
 			action, job := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionSkip))
+			Expect(action).To(Equal(provisioning.Skip))
 			Expect(job).NotTo(BeNil())
 		})
 	})
@@ -307,7 +308,7 @@ var _ = Describe("ClusterOrder Integration Tests", func() {
 			result, err := reconciler.handleProvisioning(ctx, instance)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "should requeue with backoff delay")
-			Expect(result.RequeueAfter).To(BeNumerically("<=", backoffMaxDelay))
+			Expect(result.RequeueAfter).To(BeNumerically("<=", provisioning.BackoffMaxDelay))
 			Expect(countProvisionJobs(instance)).To(Equal(1), "should not create additional jobs during backoff")
 		})
 
@@ -334,7 +335,7 @@ var _ = Describe("ClusterOrder Integration Tests", func() {
 			instance = getClusterOrder(name)
 			result1, err := reconciler.handleProvisioning(ctx, instance)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result1.RequeueAfter).To(BeNumerically("~", backoffBaseDelay, 5*time.Second), "first failure should use base delay")
+			Expect(result1.RequeueAfter).To(BeNumerically("~", provisioning.BackoffBaseDelay, 5*time.Second), "first failure should use base delay")
 			Expect(countProvisionJobs(instance)).To(Equal(1), "should not retry during backoff")
 
 			// Backdate the first failed job to 5 minutes ago to simulate backoff elapsed

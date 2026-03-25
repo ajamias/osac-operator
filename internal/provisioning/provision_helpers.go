@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package provisioning
 
 import (
 	"context"
@@ -26,28 +26,28 @@ import (
 	v1alpha1 "github.com/osac-project/osac-operator/api/v1alpha1"
 )
 
-// provisionAction represents the outcome of shouldTriggerProvision.
-type provisionAction int
+// Action represents the outcome of shouldTriggerProvision.
+type Action int
 
 const (
-	provisionSkip    provisionAction = iota // nothing to do
-	provisionTrigger                        // trigger a new provision job
-	provisionPoll                           // poll an existing non-terminal job
-	provisionRequeue                        // stale cache detected, requeue to refresh
-	provisionBackoff                        // failed job with same config, retry after backoff
+	Skip    Action = iota // nothing to do
+	Trigger               // trigger a new provision job
+	Poll                  // poll an existing non-terminal job
+	Requeue               // stale cache detected, requeue to refresh
+	Backoff               // failed job with same config, retry after backoff
 )
 
 const (
-	backoffBaseDelay = 2 * time.Minute
-	backoffMaxDelay  = 30 * time.Minute
+	BackoffBaseDelay = 2 * time.Minute
+	BackoffMaxDelay  = 30 * time.Minute
 )
 
-// handleProvisionBackoff checks if the backoff period has elapsed since the last failed job.
+// HandleBackoff checks if the backoff period has elapsed since the last failed job.
 // If elapsed, it calls triggerFn to retry. Otherwise, it returns a RequeueAfter with the remaining delay.
-func handleProvisionBackoff(ctx context.Context, jobs []v1alpha1.JobStatus, configVersion string, latestJob *v1alpha1.JobStatus, triggerFn func() (ctrl.Result, error)) (ctrl.Result, error) {
+func HandleBackoff(ctx context.Context, jobs []v1alpha1.JobStatus, configVersion string, latestJob *v1alpha1.JobStatus, triggerFn func() (ctrl.Result, error)) (ctrl.Result, error) {
 	log := ctrllog.FromContext(ctx)
-	backoff := computeBackoffFromJobs(jobs, configVersion)
-	elapsed := time.Now().UTC().Sub(latestJob.Timestamp.Time.UTC())
+	backoff := ComputeBackoffFromJobs(jobs, configVersion)
+	elapsed := time.Since(latestJob.Timestamp.Time)
 	if elapsed >= backoff {
 		log.Info("backoff elapsed, retrying provision", "jobID", latestJob.JobID, "backoff", backoff, "elapsed", elapsed)
 		return triggerFn()
@@ -57,15 +57,15 @@ func handleProvisionBackoff(ctx context.Context, jobs []v1alpha1.JobStatus, conf
 	return ctrl.Result{RequeueAfter: remaining}, nil
 }
 
-// hasJobID returns true if the job is non-nil and has a non-empty JobID.
-func hasJobID(job *v1alpha1.JobStatus) bool {
+// HasJobID returns true if the job is non-nil and has a non-empty JobID.
+func HasJobID(job *v1alpha1.JobStatus) bool {
 	return job != nil && job.JobID != ""
 }
 
-// computeBackoffFromJobs determines the next backoff duration based on the gap
+// ComputeBackoffFromJobs determines the next backoff duration based on the gap
 // between the last two failed provision jobs with the same ConfigVersion.
-// First failure uses backoffBaseDelay. Subsequent failures double the previous gap.
-func computeBackoffFromJobs(jobs []v1alpha1.JobStatus, configVersion string) time.Duration {
+// First failure uses BackoffBaseDelay. Subsequent failures double the previous gap.
+func ComputeBackoffFromJobs(jobs []v1alpha1.JobStatus, configVersion string) time.Duration {
 	// Find last two failed provision jobs with matching ConfigVersion (reverse order)
 	var last, prev *v1alpha1.JobStatus
 	for i := len(jobs) - 1; i >= 0; i-- {
@@ -81,23 +81,20 @@ func computeBackoffFromJobs(jobs []v1alpha1.JobStatus, configVersion string) tim
 		}
 	}
 
-	if last == nil {
-		return backoffBaseDelay
-	}
-	if prev == nil {
-		return backoffBaseDelay
+	if last == nil || prev == nil {
+		return BackoffBaseDelay
 	}
 
 	gap := last.Timestamp.Time.UTC().Sub(prev.Timestamp.Time.UTC())
 	if gap <= 0 {
-		return backoffBaseDelay
+		return BackoffBaseDelay
 	}
 	nextDelay := gap * 2
-	if nextDelay < backoffBaseDelay {
-		return backoffBaseDelay
+	if nextDelay < BackoffBaseDelay {
+		return BackoffBaseDelay
 	}
-	if nextDelay > backoffMaxDelay {
-		return backoffMaxDelay
+	if nextDelay > BackoffMaxDelay {
+		return BackoffMaxDelay
 	}
 	return nextDelay
 }

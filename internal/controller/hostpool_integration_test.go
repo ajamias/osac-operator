@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	osacv1alpha1 "github.com/osac-project/osac-operator/api/v1alpha1"
+	"github.com/osac-project/osac-operator/internal/provisioning"
 )
 
 var _ = Describe("HostPool Integration Tests", func() {
@@ -166,7 +167,7 @@ var _ = Describe("HostPool Integration Tests", func() {
 			}
 
 			action, _ := reconciler.shouldTriggerProvision(ctx, staleInstance)
-			Expect(action).To(Equal(provisionRequeue))
+			Expect(action).To(Equal(provisioning.Requeue))
 		})
 	})
 
@@ -233,7 +234,7 @@ var _ = Describe("HostPool Integration Tests", func() {
 			result, err := reconciler.handleProvisioning(ctx, instance)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "should requeue with backoff delay")
-			Expect(result.RequeueAfter).To(BeNumerically("<=", backoffMaxDelay))
+			Expect(result.RequeueAfter).To(BeNumerically("<=", provisioning.BackoffMaxDelay))
 			Expect(countProvisionJobs(instance)).To(Equal(1), "should not create additional jobs during backoff")
 		})
 	})

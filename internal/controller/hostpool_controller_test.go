@@ -190,7 +190,7 @@ var _ = Describe("HostPool Controller", func() {
 				},
 			}
 			action, job := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionBackoff))
+			Expect(action).To(Equal(provisioning.Backoff))
 			Expect(job).NotTo(BeNil())
 		})
 	})

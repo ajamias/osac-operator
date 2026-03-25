@@ -109,7 +109,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 				},
 			}
 			action, job := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionTrigger))
+			Expect(action).To(Equal(provisioning.Trigger))
 			Expect(job).To(BeNil())
 		})
 
@@ -121,7 +121,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 				},
 			}
 			action, _ := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionTrigger))
+			Expect(action).To(Equal(provisioning.Trigger))
 		})
 
 		It("should skip when no job exists and config versions match", func() {
@@ -132,7 +132,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 				},
 			}
 			action, job := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionSkip))
+			Expect(action).To(Equal(provisioning.Skip))
 			Expect(job).To(BeNil())
 		})
 
@@ -143,7 +143,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 				},
 			}
 			action, job := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionPoll))
+			Expect(action).To(Equal(provisioning.Poll))
 			Expect(job).NotTo(BeNil())
 			Expect(job.JobID).To(Equal("job-1"))
 		})
@@ -155,7 +155,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 				},
 			}
 			action, job := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionPoll))
+			Expect(action).To(Equal(provisioning.Poll))
 			Expect(job).NotTo(BeNil())
 		})
 
@@ -168,7 +168,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 				},
 			}
 			action, job := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionSkip))
+			Expect(action).To(Equal(provisioning.Skip))
 			Expect(job).NotTo(BeNil())
 		})
 
@@ -181,7 +181,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 				},
 			}
 			action, job := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionTrigger))
+			Expect(action).To(Equal(provisioning.Trigger))
 			Expect(job).NotTo(BeNil())
 		})
 
@@ -194,7 +194,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 				},
 			}
 			action, job := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionTrigger))
+			Expect(action).To(Equal(provisioning.Trigger))
 			Expect(job).NotTo(BeNil())
 		})
 
@@ -207,7 +207,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 				},
 			}
 			action, job := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionSkip))
+			Expect(action).To(Equal(provisioning.Skip))
 			Expect(job).NotTo(BeNil())
 		})
 
@@ -224,7 +224,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 				},
 			}
 			action, job := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionSkip))
+			Expect(action).To(Equal(provisioning.Skip))
 			Expect(job).NotTo(BeNil())
 		})
 
@@ -241,7 +241,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 				},
 			}
 			action, job := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionBackoff))
+			Expect(action).To(Equal(provisioning.Backoff))
 			Expect(job).NotTo(BeNil())
 		})
 
@@ -258,7 +258,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 				},
 			}
 			action, job := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionTrigger))
+			Expect(action).To(Equal(provisioning.Trigger))
 			Expect(job).NotTo(BeNil())
 		})
 
@@ -275,7 +275,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 				},
 			}
 			action, job := reconciler.shouldTriggerProvision(ctx, instance)
-			Expect(action).To(Equal(provisionTrigger))
+			Expect(action).To(Equal(provisioning.Trigger))
 			Expect(job).NotTo(BeNil())
 		})
 
@@ -314,7 +314,7 @@ var _ = Describe("ClusterOrder Controller", func() {
 			}
 
 			action, job := reconciler.shouldTriggerProvision(ctx, staleInstance)
-			Expect(action).To(Equal(provisionRequeue))
+			Expect(action).To(Equal(provisioning.Requeue))
 			Expect(job).To(BeNil())
 		})
 	})

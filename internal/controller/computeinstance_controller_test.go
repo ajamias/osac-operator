@@ -776,7 +776,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 					},
 				}
 				action, job := reconciler.shouldTriggerProvision(ctx, instance)
-				Expect(action).To(Equal(provisionTrigger))
+				Expect(action).To(Equal(provisioning.Trigger))
 				Expect(job).To(BeNil())
 			})
 
@@ -788,7 +788,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 					},
 				}
 				action, _ := reconciler.shouldTriggerProvision(ctx, instance)
-				Expect(action).To(Equal(provisionTrigger))
+				Expect(action).To(Equal(provisioning.Trigger))
 			})
 
 			It("should skip when no job exists and config versions match", func() {
@@ -799,7 +799,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 					},
 				}
 				action, job := reconciler.shouldTriggerProvision(ctx, instance)
-				Expect(action).To(Equal(provisionSkip))
+				Expect(action).To(Equal(provisioning.Skip))
 				Expect(job).To(BeNil())
 			})
 
@@ -810,7 +810,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 					},
 				}
 				action, job := reconciler.shouldTriggerProvision(ctx, instance)
-				Expect(action).To(Equal(provisionPoll))
+				Expect(action).To(Equal(provisioning.Poll))
 				Expect(job).NotTo(BeNil())
 				Expect(job.JobID).To(Equal("job-1"))
 			})
@@ -822,7 +822,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 					},
 				}
 				action, job := reconciler.shouldTriggerProvision(ctx, instance)
-				Expect(action).To(Equal(provisionPoll))
+				Expect(action).To(Equal(provisioning.Poll))
 				Expect(job).NotTo(BeNil())
 			})
 
@@ -835,7 +835,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 					},
 				}
 				action, job := reconciler.shouldTriggerProvision(ctx, instance)
-				Expect(action).To(Equal(provisionSkip))
+				Expect(action).To(Equal(provisioning.Skip))
 				Expect(job).NotTo(BeNil())
 			})
 
@@ -848,7 +848,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 					},
 				}
 				action, job := reconciler.shouldTriggerProvision(ctx, instance)
-				Expect(action).To(Equal(provisionTrigger))
+				Expect(action).To(Equal(provisioning.Trigger))
 				Expect(job).NotTo(BeNil())
 			})
 
@@ -861,7 +861,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 					},
 				}
 				action, job := reconciler.shouldTriggerProvision(ctx, instance)
-				Expect(action).To(Equal(provisionTrigger))
+				Expect(action).To(Equal(provisioning.Trigger))
 				Expect(job).NotTo(BeNil())
 			})
 
@@ -874,7 +874,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 					},
 				}
 				action, job := reconciler.shouldTriggerProvision(ctx, instance)
-				Expect(action).To(Equal(provisionSkip))
+				Expect(action).To(Equal(provisioning.Skip))
 				Expect(job).NotTo(BeNil())
 			})
 
@@ -893,7 +893,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 					},
 				}
 				action, job := reconciler.shouldTriggerProvision(ctx, instance)
-				Expect(action).To(Equal(provisionBackoff))
+				Expect(action).To(Equal(provisioning.Backoff))
 				Expect(job).NotTo(BeNil())
 			})
 
@@ -931,7 +931,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 				}
 
 				action, job := reconciler.shouldTriggerProvision(ctx, staleInstance)
-				Expect(action).To(Equal(provisionRequeue))
+				Expect(action).To(Equal(provisioning.Requeue))
 				Expect(job).To(BeNil())
 			})
 
@@ -976,7 +976,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 				}
 
 				action, job := reconciler.shouldTriggerProvision(ctx, staleInstance)
-				Expect(action).To(Equal(provisionRequeue))
+				Expect(action).To(Equal(provisioning.Requeue))
 				Expect(job).To(BeNil())
 			})
 
@@ -1019,7 +1019,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 				}
 
 				action, job := reconciler.shouldTriggerProvision(ctx, staleInstance)
-				Expect(action).To(Equal(provisionTrigger))
+				Expect(action).To(Equal(provisioning.Trigger))
 				Expect(job).NotTo(BeNil())
 				Expect(job.JobID).To(Equal("done-job"))
 			})
@@ -1808,18 +1808,18 @@ var _ = Describe("ComputeInstance Controller", func() {
 		})
 	})
 
-	Context("computeBackoffFromJobs", func() {
+	Context("provisioning.ComputeBackoffFromJobs", func() {
 		now := time.Now().UTC()
 
 		It("should return base delay for empty jobs", func() {
-			Expect(computeBackoffFromJobs(nil, "v1")).To(Equal(backoffBaseDelay))
+			Expect(provisioning.ComputeBackoffFromJobs(nil, "v1")).To(Equal(provisioning.BackoffBaseDelay))
 		})
 
 		It("should return base delay for single failed job", func() {
 			jobs := []osacv1alpha1.JobStatus{
 				{Type: osacv1alpha1.JobTypeProvision, State: osacv1alpha1.JobStateFailed, ConfigVersion: "v1", Timestamp: metav1.NewTime(now)},
 			}
-			Expect(computeBackoffFromJobs(jobs, "v1")).To(Equal(backoffBaseDelay))
+			Expect(provisioning.ComputeBackoffFromJobs(jobs, "v1")).To(Equal(provisioning.BackoffBaseDelay))
 		})
 
 		It("should double the gap between two failed jobs", func() {
@@ -1827,7 +1827,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 				{Type: osacv1alpha1.JobTypeProvision, State: osacv1alpha1.JobStateFailed, ConfigVersion: "v1", Timestamp: metav1.NewTime(now.Add(-5 * time.Minute))},
 				{Type: osacv1alpha1.JobTypeProvision, State: osacv1alpha1.JobStateFailed, ConfigVersion: "v1", Timestamp: metav1.NewTime(now)},
 			}
-			Expect(computeBackoffFromJobs(jobs, "v1")).To(Equal(10 * time.Minute))
+			Expect(provisioning.ComputeBackoffFromJobs(jobs, "v1")).To(Equal(10 * time.Minute))
 		})
 
 		It("should cap at max delay", func() {
@@ -1835,7 +1835,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 				{Type: osacv1alpha1.JobTypeProvision, State: osacv1alpha1.JobStateFailed, ConfigVersion: "v1", Timestamp: metav1.NewTime(now.Add(-20 * time.Minute))},
 				{Type: osacv1alpha1.JobTypeProvision, State: osacv1alpha1.JobStateFailed, ConfigVersion: "v1", Timestamp: metav1.NewTime(now)},
 			}
-			Expect(computeBackoffFromJobs(jobs, "v1")).To(Equal(backoffMaxDelay))
+			Expect(provisioning.ComputeBackoffFromJobs(jobs, "v1")).To(Equal(provisioning.BackoffMaxDelay))
 		})
 
 		It("should return base delay when gap is smaller than base", func() {
@@ -1843,7 +1843,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 				{Type: osacv1alpha1.JobTypeProvision, State: osacv1alpha1.JobStateFailed, ConfigVersion: "v1", Timestamp: metav1.NewTime(now.Add(-30 * time.Second))},
 				{Type: osacv1alpha1.JobTypeProvision, State: osacv1alpha1.JobStateFailed, ConfigVersion: "v1", Timestamp: metav1.NewTime(now)},
 			}
-			Expect(computeBackoffFromJobs(jobs, "v1")).To(Equal(backoffBaseDelay))
+			Expect(provisioning.ComputeBackoffFromJobs(jobs, "v1")).To(Equal(provisioning.BackoffBaseDelay))
 		})
 
 		It("should return base delay when timestamps are equal (zero gap)", func() {
@@ -1851,7 +1851,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 				{Type: osacv1alpha1.JobTypeProvision, State: osacv1alpha1.JobStateFailed, ConfigVersion: "v1", Timestamp: metav1.NewTime(now)},
 				{Type: osacv1alpha1.JobTypeProvision, State: osacv1alpha1.JobStateFailed, ConfigVersion: "v1", Timestamp: metav1.NewTime(now)},
 			}
-			Expect(computeBackoffFromJobs(jobs, "v1")).To(Equal(backoffBaseDelay))
+			Expect(provisioning.ComputeBackoffFromJobs(jobs, "v1")).To(Equal(provisioning.BackoffBaseDelay))
 		})
 
 		It("should ignore jobs with different ConfigVersion", func() {
@@ -1860,7 +1860,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 				{Type: osacv1alpha1.JobTypeProvision, State: osacv1alpha1.JobStateFailed, ConfigVersion: "v2", Timestamp: metav1.NewTime(now)},
 			}
 			// Only one job matches "v1", so base delay
-			Expect(computeBackoffFromJobs(jobs, "v1")).To(Equal(backoffBaseDelay))
+			Expect(provisioning.ComputeBackoffFromJobs(jobs, "v1")).To(Equal(provisioning.BackoffBaseDelay))
 		})
 
 		It("should ignore non-provision jobs", func() {
@@ -1869,7 +1869,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 				{Type: osacv1alpha1.JobTypeDeprovision, State: osacv1alpha1.JobStateFailed, ConfigVersion: "v1", Timestamp: metav1.NewTime(now.Add(-3 * time.Minute))},
 				{Type: osacv1alpha1.JobTypeProvision, State: osacv1alpha1.JobStateFailed, ConfigVersion: "v1", Timestamp: metav1.NewTime(now)},
 			}
-			Expect(computeBackoffFromJobs(jobs, "v1")).To(Equal(10 * time.Minute))
+			Expect(provisioning.ComputeBackoffFromJobs(jobs, "v1")).To(Equal(10 * time.Minute))
 		})
 
 		It("should ignore succeeded jobs", func() {
@@ -1879,7 +1879,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 				{Type: osacv1alpha1.JobTypeProvision, State: osacv1alpha1.JobStateFailed, ConfigVersion: "v1", Timestamp: metav1.NewTime(now)},
 			}
 			// Gap is between the two failed jobs (5 min), not between failed and succeeded
-			Expect(computeBackoffFromJobs(jobs, "v1")).To(Equal(10 * time.Minute))
+			Expect(provisioning.ComputeBackoffFromJobs(jobs, "v1")).To(Equal(10 * time.Minute))
 		})
 	})
 })
