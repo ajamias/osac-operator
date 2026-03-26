@@ -203,7 +203,7 @@ var _ = Describe("SecurityGroupReconciler", func() {
 			// Second reconcile should requeue
 			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+			Expect(result.RequeueAfter).To(Equal(defaultPreconditionRequeueInterval))
 		})
 
 		It("should read implementation strategy from parent VirtualNetwork", func() {
@@ -376,7 +376,7 @@ var _ = Describe("SecurityGroupReconciler", func() {
 			// Second reconcile should requeue due to missing ImplementationStrategy
 			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+			Expect(result.RequeueAfter).To(Equal(defaultPreconditionRequeueInterval))
 		})
 
 		It("should trigger provision job when no job exists", func() {

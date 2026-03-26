@@ -51,6 +51,11 @@ const (
 
 	// DefaultStatusPollInterval is the default interval for polling provider job status
 	DefaultStatusPollInterval = 30 * time.Second
+
+	// defaultPreconditionRequeueInterval is the requeue delay when a precondition for
+	// reconciliation is not yet met (e.g. parent resource not found, configuration
+	// not populated, or dependent resource not in a ready state)
+	defaultPreconditionRequeueInterval = 10 * time.Second
 )
 
 // ComputeInstanceReconciler reconciles a ComputeInstance object
@@ -658,7 +663,7 @@ func (r *ComputeInstanceReconciler) handleUpdate(ctx context.Context, _ reconcil
 		}
 		instance.SetStatusCondition(v1alpha1.ComputeInstanceConditionProvisioned, metav1.ConditionFalse, msg, "TenantNotReady")
 		log.Info("tenant is not ready, requeueing", "tenant", tenant.GetName())
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: defaultPreconditionRequeueInterval}, nil
 	}
 
 	targetClient, err := r.getTargetClient(ctx)

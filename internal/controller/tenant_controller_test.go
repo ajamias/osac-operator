@@ -209,7 +209,7 @@ var _ = Describe("Tenant Controller", func() {
 			By("verifying a DuplicateStorageClass warning event was emitted")
 			Expect(fakeRecorder.Events).To(Receive(And(
 				ContainSubstring("Warning"),
-				ContainSubstring("DuplicateStorageClass"),
+				ContainSubstring(eventReasonDuplicateStorageClass),
 				ContainSubstring(resourceName+"-sc"),
 				ContainSubstring(resourceName+"-sc-extra"),
 			)))
@@ -280,7 +280,7 @@ var _ = Describe("Tenant Controller", func() {
 			By("verifying a DuplicateStorageClass warning event was emitted for Default SCs")
 			Expect(fakeRecorder.Events).To(Receive(And(
 				ContainSubstring("Warning"),
-				ContainSubstring("DuplicateStorageClass"),
+				ContainSubstring(eventReasonDuplicateStorageClass),
 				ContainSubstring("shared-default-sc-1"),
 				ContainSubstring("shared-default-sc-2"),
 				ContainSubstring(resourceName),

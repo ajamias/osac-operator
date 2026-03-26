@@ -160,7 +160,7 @@ var _ = Describe("SubnetReconciler", func() {
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+			Expect(result.RequeueAfter).To(Equal(defaultPreconditionRequeueInterval))
 
 			// Cleanup
 			_ = k8sClient.Delete(ctx, subnetNoParent)
@@ -204,7 +204,7 @@ var _ = Describe("SubnetReconciler", func() {
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+			Expect(result.RequeueAfter).To(Equal(defaultPreconditionRequeueInterval))
 
 			// Cleanup
 			_ = k8sClient.Delete(ctx, subnetNoStrategy)

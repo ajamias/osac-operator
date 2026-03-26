@@ -1458,8 +1458,8 @@ var _ = Describe("ComputeInstance Controller", func() {
 		It("should set Provisioned=False with Tenant phase when tenant is Progressing", func() {
 			const resourceName = "test-ci-tenant-progressing"
 			const tenantName = "tenant-progressing-msg"
-			defer deleteCI(resourceName)
-			defer deleteTenantInNamespace(ctx, namespaceName, tenantName)
+			DeferCleanup(func() { deleteCI(resourceName) })
+			DeferCleanup(func() { deleteTenantInNamespace(ctx, namespaceName, tenantName) })
 
 			// Create tenant in Progressing state (no StorageClassReady condition)
 			tenant := &osacv1alpha1.Tenant{
@@ -1489,7 +1489,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 
 			result, err := controllerReconciler.Reconcile(ctx, mcreconcile.Request{Request: reconcile.Request{NamespacedName: nn}})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+			Expect(result.RequeueAfter).To(Equal(defaultPreconditionRequeueInterval))
 
 			ci := &osacv1alpha1.ComputeInstance{}
 			Eventually(func(g Gomega) {
@@ -1505,8 +1505,8 @@ var _ = Describe("ComputeInstance Controller", func() {
 		It("should include StorageClassReady condition in Provisioned message", func() {
 			const resourceName = "test-ci-tenant-sc-msg"
 			const tenantName = "tenant-sc-msg"
-			defer deleteCI(resourceName)
-			defer deleteTenantInNamespace(ctx, namespaceName, tenantName)
+			DeferCleanup(func() { deleteCI(resourceName) })
+			DeferCleanup(func() { deleteTenantInNamespace(ctx, namespaceName, tenantName) })
 
 			// Create tenant in Progressing state with a StorageClassReady condition
 			tenant := &osacv1alpha1.Tenant{
@@ -1542,7 +1542,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 
 			result, err := controllerReconciler.Reconcile(ctx, mcreconcile.Request{Request: reconcile.Request{NamespacedName: nn}})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+			Expect(result.RequeueAfter).To(Equal(defaultPreconditionRequeueInterval))
 
 			ci := &osacv1alpha1.ComputeInstance{}
 			Eventually(func(g Gomega) {
@@ -1559,8 +1559,8 @@ var _ = Describe("ComputeInstance Controller", func() {
 		It("should clear TenantNotReady message when tenant becomes Ready", func() {
 			const resourceName = "test-ci-tenant-recovery"
 			const tenantName = "tenant-recovery-msg"
-			defer deleteCI(resourceName)
-			defer deleteTenantInNamespace(ctx, namespaceName, tenantName)
+			DeferCleanup(func() { deleteCI(resourceName) })
+			DeferCleanup(func() { deleteTenantInNamespace(ctx, namespaceName, tenantName) })
 
 			// Create tenant in Progressing state
 			tenant := &osacv1alpha1.Tenant{
@@ -1597,7 +1597,7 @@ var _ = Describe("ComputeInstance Controller", func() {
 			// First reconcile with Progressing tenant → Provisioned=False/TenantNotReady
 			result, err := controllerReconciler.Reconcile(ctx, mcreconcile.Request{Request: reconcile.Request{NamespacedName: nn}})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+			Expect(result.RequeueAfter).To(Equal(defaultPreconditionRequeueInterval))
 
 			ci := &osacv1alpha1.ComputeInstance{}
 			Eventually(func(g Gomega) {

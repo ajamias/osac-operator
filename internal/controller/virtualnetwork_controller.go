@@ -106,7 +106,7 @@ func (r *VirtualNetworkReconciler) handleUpdate(ctx context.Context, vnet *v1alp
 	implementationStrategy := vnet.Spec.ImplementationStrategy
 	if implementationStrategy == "" {
 		log.Info("implementation strategy not set, requeueing", "virtualNetwork", vnet.Name)
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: defaultPreconditionRequeueInterval}, nil
 	}
 
 	// Add implementation-strategy annotation if not present or different

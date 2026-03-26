@@ -25,6 +25,16 @@ const (
 	// available to all tenants. No Tenant CR can be named "Default" because uppercase
 	// is forbidden in Kubernetes resource names.
 	defaultStorageClassSentinel = "Default"
+
+	// tenantControllerName is the name used when creating the event recorder
+	tenantControllerName = "tenant-controller"
+
+	// eventReasonDuplicateStorageClass is the event reason emitted when multiple
+	// StorageClasses match a tenant
+	eventReasonDuplicateStorageClass = "DuplicateStorageClass"
+
+	// eventActionDetectDuplicate is the event action for duplicate StorageClass detection
+	eventActionDetectDuplicate = "DetectDuplicate"
 )
 
 var (

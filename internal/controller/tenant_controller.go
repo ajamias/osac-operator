@@ -63,7 +63,7 @@ func NewTenantReconciler(mgr mcmanager.Manager, tenantNamespace string, targetCl
 	return &TenantReconciler{
 		Client:          mgr.GetLocalManager().GetClient(),
 		Scheme:          mgr.GetLocalManager().GetScheme(),
-		Recorder:        mgr.GetLocalManager().GetEventRecorder("tenant-controller"),
+		Recorder:        mgr.GetLocalManager().GetEventRecorder(tenantControllerName),
 		tenantNamespace: tenantNamespace,
 		mgr:             mgr,
 		targetCluster:   targetCluster,
@@ -151,7 +151,7 @@ func (r *TenantReconciler) handleUpdate(ctx context.Context, req reconcile.Reque
 			scResult.reason,
 			scResult.message)
 		if scResult.reason == v1alpha1.TenantReasonMultipleFound || scResult.reason == v1alpha1.TenantReasonMultipleDefaultsFound {
-			r.Recorder.Eventf(instance, nil, corev1.EventTypeWarning, "DuplicateStorageClass", "DetectDuplicate", scResult.message)
+			r.Recorder.Eventf(instance, nil, corev1.EventTypeWarning, eventReasonDuplicateStorageClass, eventActionDetectDuplicate, "%s", scResult.message)
 		}
 		return ctrl.Result{}, nil
 	}
@@ -215,7 +215,7 @@ func (r *TenantReconciler) getTenantStorageClass(ctx context.Context, targetClie
 		joined, names := joinStorageClassNames(tenantSCList.Items)
 		msg := fmt.Sprintf("Multiple StorageClasses found for tenant %q: [%s]. Exactly one is required; remove the extras to resolve.",
 			tenantName, joined)
-		log.Error(nil, msg, "tenant", tenantName, "storageClasses", names)
+		log.Info(msg, "tenant", tenantName, "storageClasses", names)
 		return storageClassResult{
 			reason:  v1alpha1.TenantReasonMultipleFound,
 			message: msg,
@@ -252,7 +252,7 @@ func (r *TenantReconciler) getTenantStorageClass(ctx context.Context, targetClie
 		joined, names := joinStorageClassNames(defaultSCList.Items)
 		msg := fmt.Sprintf("Multiple shared Default StorageClasses found: [%s]. Exactly one is required; remove the extras to resolve. Tenant %q has no dedicated StorageClass and is affected.",
 			joined, tenantName)
-		log.Error(nil, msg, "tenant", tenantName, "storageClasses", names)
+		log.Info(msg, "tenant", tenantName, "storageClasses", names)
 		return storageClassResult{
 			reason:  v1alpha1.TenantReasonMultipleDefaultsFound,
 			message: msg,

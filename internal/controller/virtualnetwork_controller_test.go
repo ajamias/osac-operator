@@ -167,7 +167,7 @@ var _ = Describe("VirtualNetworkReconciler", func() {
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
+			Expect(result.RequeueAfter).To(Equal(defaultPreconditionRequeueInterval))
 		})
 	})
 
