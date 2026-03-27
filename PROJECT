@@ -55,5 +55,9 @@ resources:
   group: osac
   kind: BareMetalPool
   path: github.com/osac-project/osac-operator/api/v1alpha1
+- controller: true
+  domain: openshift.io
+  group: osac
+  kind: Host
   version: v1alpha1
 version: "3"

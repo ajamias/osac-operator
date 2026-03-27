@@ -62,6 +62,7 @@ rules:
   - clusterorders
   - computeinstances
   - hostpools
+  - hosts
   - securitygroups
   - subnets
   - tenants
@@ -81,6 +82,7 @@ rules:
   - clusterorders/finalizers
   - computeinstances/finalizers
   - hostpools/finalizers
+  - hosts/finalizers
   - securitygroups/finalizers
   - subnets/finalizers
   - tenants/finalizers
@@ -94,6 +96,7 @@ rules:
   - clusterorders/status
   - computeinstances/status
   - hostpools/status
+  - hosts/status
   - securitygroups/status
   - subnets/status
   - tenants/status
@@ -102,16 +105,6 @@ rules:
   - get
   - patch
   - update
-- apiGroups:
-  - osac.openshift.io
-  resources:
-  - hosts
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - watch
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
