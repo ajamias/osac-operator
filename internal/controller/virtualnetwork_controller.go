@@ -172,7 +172,7 @@ func (r *VirtualNetworkReconciler) handleProvisioning(ctx context.Context, vnet 
 	// Update job status
 	updatedJob := *latestProvisionJob
 	updatedJob.State = status.State
-	updatedJob.Message = status.Message
+	updatedJob.Message = status.MessageWithDetails()
 	provisioning.UpdateJob(vnet.Status.Jobs, updatedJob)
 
 	// If job is still running, requeue

@@ -237,7 +237,7 @@ func (r *SubnetReconciler) handleProvisioning(ctx context.Context, subnet *v1alp
 	// Update job status
 	updatedJob := *latestProvisionJob
 	updatedJob.State = status.State
-	updatedJob.Message = status.Message
+	updatedJob.Message = status.MessageWithDetails()
 	provisioning.UpdateJob(subnet.Status.Jobs, updatedJob)
 
 	// If job is still running, requeue
