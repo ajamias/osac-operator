@@ -525,6 +525,7 @@ var _ = Describe("SubnetFeedbackController", func() {
 					Labels: map[string]string{
 						osacSubnetIDLabel: subnetID,
 					},
+					Finalizers: []string{osacSubnetFeedbackFinalizer},
 				},
 				Spec: v1alpha1.SubnetSpec{
 					VirtualNetwork: "vnet-123",
@@ -544,10 +545,8 @@ var _ = Describe("SubnetFeedbackController", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			// The first reconcile will trigger an update because the finalizer is added,
-			// which causes a state sync. Check the state is still READY.
-			// Note: the update happens because clone() creates a copy and the comparison
-			// may detect the finalizer-related object change.
+			// Assert no Update RPC was called (state already READY, finalizer pre-seeded)
+			Expect(mockServer.updates).To(BeEmpty())
 		})
 	})
 })

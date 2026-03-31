@@ -109,7 +109,7 @@ func (r *SubnetFeedbackReconciler) Reconcile(ctx context.Context, request ctrl.R
 	if object.DeletionTimestamp.IsZero() {
 		err = t.handleUpdate(ctx)
 	} else {
-		t.handleDelete(ctx)
+		t.handleDelete()
 	}
 	if err != nil {
 		return result, err
@@ -208,25 +208,15 @@ func (t *subnetFeedbackReconcilerTask) handleUpdate(ctx context.Context) error {
 	return nil
 }
 
-// handleDelete syncs the CR state (including the DELETING phase) to the
-// fulfillment service. Called when the CR is being deleted.
-func (t *subnetFeedbackReconcilerTask) handleDelete(ctx context.Context) {
-	t.syncDeletePhase(ctx)
-}
-
-// syncDeletePhase maps K8s phases to fulfillment states during deletion.
-// During deletion, a Failed phase means the deletion itself failed (DELETE_FAILED),
-// not a creation/provisioning failure.
-func (t *subnetFeedbackReconcilerTask) syncDeletePhase(ctx context.Context) {
-	switch t.object.Status.Phase {
-	case v1alpha1.SubnetPhaseFailed:
+// handleDelete syncs the deletion phase to the fulfillment service.
+// Only the phase is synced during deletion (not backend network ID),
+// because we only need to communicate DELETING/DELETE_FAILED state.
+func (t *subnetFeedbackReconcilerTask) handleDelete() {
+	if t.object.Status.Phase == v1alpha1.SubnetPhaseFailed {
 		t.subnet.GetStatus().SetState(privatev1.SubnetState_SUBNET_STATE_DELETE_FAILED)
-	case v1alpha1.SubnetPhaseDeleting:
-		t.subnet.GetStatus().SetState(privatev1.SubnetState_SUBNET_STATE_DELETING)
-	default:
-		// For any other phase during deletion, treat as DELETING
-		t.subnet.GetStatus().SetState(privatev1.SubnetState_SUBNET_STATE_DELETING)
+		return
 	}
+	t.subnet.GetStatus().SetState(privatev1.SubnetState_SUBNET_STATE_DELETING)
 }
 
 func (t *subnetFeedbackReconcilerTask) syncPhase(ctx context.Context) {
