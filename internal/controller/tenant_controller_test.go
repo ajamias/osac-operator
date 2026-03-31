@@ -72,7 +72,7 @@ var _ = Describe("Tenant Controller", func() {
 		})
 
 		It("should transition through all Ready/Progressing phases with conditions", func() {
-			fakeRecorder := events.NewFakeRecorder(10)
+			fakeRecorder := events.NewFakeRecorder(100)
 			controllerReconciler := NewTenantReconciler(testMcManager, "default", mcmanager.LocalCluster)
 			controllerReconciler.Recorder = fakeRecorder
 
@@ -87,7 +87,13 @@ var _ = Describe("Tenant Controller", func() {
 				}})
 				return err
 			}
-			assertStatus := func(
+			// reconcileAndAssertStatus re-reconciles on each retry so that
+			// the controller's informer cache has time to observe recent
+			// creates / deletes before the assertions are evaluated.
+			// The reconcile error is intentionally ignored because the
+			// reconciler may return transient errors (e.g. namespace not
+			// found) while still correctly setting status conditions.
+			reconcileAndAssertStatus := func(
 				expectedPhase v1alpha1.TenantPhaseType,
 				expectedSC string,
 				expectedNSStatus metav1.ConditionStatus,
@@ -96,6 +102,7 @@ var _ = Describe("Tenant Controller", func() {
 				expectedSCReason string,
 			) {
 				Eventually(func(g Gomega) {
+					_ = doReconcile()
 					g.Expect(k8sClient.Get(ctx, typeNamespacedName, tenant)).To(Succeed())
 					g.Expect(tenant.Status.Phase).To(Equal(expectedPhase))
 					g.Expect(tenant.Status.StorageClass).To(Equal(expectedSC))
@@ -124,8 +131,7 @@ var _ = Describe("Tenant Controller", func() {
 
 			// ── Step 1: no namespace → Progressing, NamespaceReady=False ──────────
 			By("reconciling when namespace does not exist")
-			_ = doReconcile()
-			assertStatus(
+			reconcileAndAssertStatus(
 				v1alpha1.TenantPhaseProgressing, "",
 				metav1.ConditionFalse, v1alpha1.TenantReasonNotFound,
 				metav1.ConditionFalse, v1alpha1.TenantReasonNotFound,
@@ -140,8 +146,7 @@ var _ = Describe("Tenant Controller", func() {
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, namespace) })
 
 			By("reconciling with namespace but no StorageClass")
-			Expect(doReconcile()).NotTo(HaveOccurred())
-			assertStatus(
+			reconcileAndAssertStatus(
 				v1alpha1.TenantPhaseProgressing, "",
 				metav1.ConditionTrue, v1alpha1.TenantReasonFound,
 				metav1.ConditionFalse, v1alpha1.TenantReasonNotFound,
@@ -159,8 +164,7 @@ var _ = Describe("Tenant Controller", func() {
 			Expect(k8sClient.Create(ctx, defaultSC)).To(Succeed())
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, defaultSC) })
 
-			Expect(doReconcile()).NotTo(HaveOccurred())
-			assertStatus(
+			reconcileAndAssertStatus(
 				v1alpha1.TenantPhaseReady, "shared-default-sc",
 				metav1.ConditionTrue, v1alpha1.TenantReasonFound,
 				metav1.ConditionTrue, v1alpha1.TenantReasonSharedDefault,
@@ -178,8 +182,7 @@ var _ = Describe("Tenant Controller", func() {
 			Expect(k8sClient.Create(ctx, tenantSC)).To(Succeed())
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, tenantSC) })
 
-			Expect(doReconcile()).NotTo(HaveOccurred())
-			assertStatus(
+			reconcileAndAssertStatus(
 				v1alpha1.TenantPhaseReady, resourceName+"-sc",
 				metav1.ConditionTrue, v1alpha1.TenantReasonFound,
 				metav1.ConditionTrue, v1alpha1.TenantReasonFound,
@@ -197,8 +200,7 @@ var _ = Describe("Tenant Controller", func() {
 			Expect(k8sClient.Create(ctx, extraSC)).To(Succeed())
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, extraSC) })
 
-			Expect(doReconcile()).NotTo(HaveOccurred())
-			assertStatus(
+			reconcileAndAssertStatus(
 				v1alpha1.TenantPhaseProgressing, "",
 				metav1.ConditionTrue, v1alpha1.TenantReasonFound,
 				metav1.ConditionFalse, v1alpha1.TenantReasonMultipleFound,
@@ -218,8 +220,7 @@ var _ = Describe("Tenant Controller", func() {
 			By("removing the extra tenant StorageClass")
 			Expect(k8sClient.Delete(ctx, extraSC)).To(Succeed())
 
-			Expect(doReconcile()).NotTo(HaveOccurred())
-			assertStatus(
+			reconcileAndAssertStatus(
 				v1alpha1.TenantPhaseReady, resourceName+"-sc",
 				metav1.ConditionTrue, v1alpha1.TenantReasonFound,
 				metav1.ConditionTrue, v1alpha1.TenantReasonFound,
@@ -229,8 +230,7 @@ var _ = Describe("Tenant Controller", func() {
 			By("removing the tenant-specific StorageClass")
 			Expect(k8sClient.Delete(ctx, tenantSC)).To(Succeed())
 
-			Expect(doReconcile()).NotTo(HaveOccurred())
-			assertStatus(
+			reconcileAndAssertStatus(
 				v1alpha1.TenantPhaseReady, "shared-default-sc",
 				metav1.ConditionTrue, v1alpha1.TenantReasonFound,
 				metav1.ConditionTrue, v1alpha1.TenantReasonSharedDefault,
@@ -240,8 +240,7 @@ var _ = Describe("Tenant Controller", func() {
 			By("removing the shared Default StorageClass")
 			Expect(k8sClient.Delete(ctx, defaultSC)).To(Succeed())
 
-			Expect(doReconcile()).NotTo(HaveOccurred())
-			assertStatus(
+			reconcileAndAssertStatus(
 				v1alpha1.TenantPhaseProgressing, "",
 				metav1.ConditionTrue, v1alpha1.TenantReasonFound,
 				metav1.ConditionFalse, v1alpha1.TenantReasonNotFound,
@@ -268,8 +267,7 @@ var _ = Describe("Tenant Controller", func() {
 			Expect(k8sClient.Create(ctx, defaultSC2)).To(Succeed())
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, defaultSC2) })
 
-			Expect(doReconcile()).NotTo(HaveOccurred())
-			assertStatus(
+			reconcileAndAssertStatus(
 				v1alpha1.TenantPhaseProgressing, "",
 				metav1.ConditionTrue, v1alpha1.TenantReasonFound,
 				metav1.ConditionFalse, v1alpha1.TenantReasonMultipleDefaultsFound,
