@@ -61,6 +61,7 @@ rules:
   - baremetalpools
   - clusterorders
   - computeinstances
+  - hostleases
   - securitygroups
   - subnets
   - tenants
@@ -79,6 +80,7 @@ rules:
   - baremetalpools/finalizers
   - clusterorders/finalizers
   - computeinstances/finalizers
+  - hostleases/finalizers
   - securitygroups/finalizers
   - subnets/finalizers
   - tenants/finalizers
@@ -91,6 +93,7 @@ rules:
   - baremetalpools/status
   - clusterorders/status
   - computeinstances/status
+  - hostleases/status
   - securitygroups/status
   - subnets/status
   - tenants/status

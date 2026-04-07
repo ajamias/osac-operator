@@ -46,5 +46,13 @@ resources:
   group: osac
   kind: BareMetalPool
   path: github.com/osac-project/osac-operator/api/v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: openshift.io
+  group: osac
+  kind: HostLease
+  path: github.com/osac-project/osac-operator/api/v1alpha1
   version: v1alpha1
 version: "3"

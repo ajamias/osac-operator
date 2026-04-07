@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"golang.org/x/sync/errgroup"
+	"gopkg.in/yaml.v3"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -61,6 +62,8 @@ import (
 	"github.com/osac-project/osac-operator/internal/aap"
 	"github.com/osac-project/osac-operator/internal/controller"
 	"github.com/osac-project/osac-operator/internal/helpers"
+	"github.com/osac-project/osac-operator/internal/inventory"
+	"github.com/osac-project/osac-operator/internal/lock"
 	"github.com/osac-project/osac-operator/internal/provisioning"
 	// +kubebuilder:scaffold:imports
 )
@@ -110,7 +113,13 @@ const (
 	envEnableComputeInstanceController = "OSAC_ENABLE_COMPUTE_INSTANCE_CONTROLLER"
 	envEnableClusterController         = "OSAC_ENABLE_CLUSTER_CONTROLLER"
 	envEnableNetworkingController      = "OSAC_ENABLE_NETWORKING_CONTROLLER"
-	envEnableBareMetalPoolController   = "OSAC_ENABLE_BAREMETALPOOL_CONTROLLER"
+	envEnableBareMetalController       = "OSAC_ENABLE_BAREMETAL_CONTROLLER"
+
+	// Inventory configuration (for Host controller)
+	envInventoryConfigFile = "OSAC_INVENTORY_CONFIG_FILE"
+
+	// Lock configuration (for Host controller distributed locking)
+	envLockConfigFile = "OSAC_LOCK_CONFIG_FILE"
 
 	remoteClusterName = "remote"
 )
@@ -121,7 +130,7 @@ type controllerFlags struct {
 	ComputeInstance bool
 	Cluster         bool
 	Networking      bool
-	BareMetalPool   bool
+	BareMetal       bool
 }
 
 // registerControllerFlags registers controller enable flags with the flag package
@@ -140,20 +149,20 @@ func registerControllerFlags() *controllerFlags {
 	flag.BoolVar(&flags.Networking, "enable-networking-controller",
 		helpers.GetEnvWithDefault(envEnableNetworkingController, false),
 		"Enable the networking controllers (VirtualNetwork, Subnet, SecurityGroup).")
-	flag.BoolVar(&flags.BareMetalPool, "enable-baremetalpool-controller",
-		helpers.GetEnvWithDefault(envEnableBareMetalPoolController, false),
-		"Enable the bare-metal-pool controller.")
+	flag.BoolVar(&flags.BareMetal, "enable-baremetal-controller",
+		helpers.GetEnvWithDefault(envEnableBareMetalController, false),
+		"Enable the bare metal controllers (BareMetalPool, Host).")
 	return flags
 }
 
 // enableAllIfNoneSet enables all controllers if none are explicitly enabled.
 func (f *controllerFlags) enableAllIfNoneSet() {
-	if !f.Tenant && !f.ComputeInstance && !f.Cluster && !f.Networking && !f.BareMetalPool {
+	if !f.Tenant && !f.ComputeInstance && !f.Cluster && !f.Networking && !f.BareMetal {
 		f.Tenant = true
 		f.ComputeInstance = true
 		f.Cluster = true
 		f.Networking = true
-		f.BareMetalPool = true
+		f.BareMetal = true
 		setupLog.Info("no controller flags set, enabling all controllers")
 	}
 }
@@ -525,15 +534,81 @@ func setupNetworkingControllers(
 	return nil
 }
 
-// setupBareMetalPoolController registers the BareMetalPool controller.
-func setupBareMetalPoolController(mgr mcmanager.Manager) error {
+// setupBareMetalControllers registers the BareMetalPool and Host controllers.
+func setupBareMetalControllers(mgr mcmanager.Manager) error {
+	ctx := context.Background()
 	localMgr := mgr.GetLocalManager()
+
+	// Setup BareMetalPool controller (no special dependencies)
 	if err := (&controller.BareMetalPoolReconciler{
 		Client: localMgr.GetClient(),
 		Scheme: localMgr.GetScheme(),
 	}).SetupWithManager(localMgr); err != nil {
 		return fmt.Errorf("baremetalpool controller: %w", err)
 	}
+
+	// Create inventory client from config file
+	inventoryConfigFilePath := helpers.GetEnvWithDefault(envInventoryConfigFile, "/etc/osac/inventory.yaml")
+	inventoryConfigFile, err := os.Open(inventoryConfigFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to open inventory config file %s: %w", inventoryConfigFilePath, err)
+	}
+	defer inventoryConfigFile.Close() // nolint
+
+	inventoryDecoder := yaml.NewDecoder(inventoryConfigFile)
+	inventoryConfigs := []inventory.Config{}
+	if err = inventoryDecoder.Decode(&inventoryConfigs); err != nil {
+		return fmt.Errorf("failed to parse inventory config: %w", err)
+	}
+	if len(inventoryConfigs) == 0 {
+		return fmt.Errorf("no inventory configurations found in %s", inventoryConfigFilePath)
+	}
+	if len(inventoryConfigs) > 1 {
+		setupLog.Info("multiple inventory configs found, using first one", "count", len(inventoryConfigs))
+	}
+
+	inventoryClient, err := inventory.NewClient(ctx, &inventoryConfigs[0])
+	if err != nil {
+		return fmt.Errorf("failed to create inventory client: %w", err)
+	}
+	if inventoryClient == nil {
+		return fmt.Errorf("inventory client type %s is not supported", inventoryConfigs[0].Type)
+	}
+	setupLog.Info("initialized inventory client", "type", inventoryConfigs[0].Type, "name", inventoryConfigs[0].Name)
+
+	// 2. Create distributed lock from config file
+	lockConfigFilePath := helpers.GetEnvWithDefault(envLockConfigFile, "/etc/lock/lock.yaml")
+	lockConfigFile, err := os.Open(lockConfigFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to open lock config file %s: %w", lockConfigFilePath, err)
+	}
+	defer lockConfigFile.Close() // nolint
+
+	lockDecoder := yaml.NewDecoder(lockConfigFile)
+	lockConfig := &lock.Config{}
+	if err = lockDecoder.Decode(lockConfig); err != nil {
+		return fmt.Errorf("failed to parse lock config: %w", err)
+	}
+
+	hostLocker, err := lock.NewLocker(ctx, lockConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create distributed lock: %w", err)
+	}
+	if hostLocker == nil {
+		return fmt.Errorf("locker type %s is not supported", lockConfig.Type)
+	}
+	setupLog.Info("initialized distributed lock", "type", lockConfig.Type, "ttl", lockConfig.TTL)
+
+	// 3. Setup HostLease controller with dependencies
+	if err := (&controller.HostLeaseReconciler{
+		Client:          localMgr.GetClient(),
+		Scheme:          localMgr.GetScheme(),
+		InventoryClient: inventoryClient,
+		Locker:          hostLocker,
+	}).SetupWithManager(localMgr); err != nil {
+		return fmt.Errorf("host lease controller: %w", err)
+	}
+
 	return nil
 }
 
@@ -669,7 +744,7 @@ func main() {
 			ctrlFlags.ComputeInstance,
 			ctrlFlags.Tenant,
 			ctrlFlags.Networking,
-			ctrlFlags.BareMetalPool,
+			ctrlFlags.BareMetal,
 		)
 	} else {
 		remoteScheme = runtime.NewScheme()
@@ -752,9 +827,9 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	if ctrlFlags.BareMetalPool {
-		if err := setupBareMetalPoolController(mgr); err != nil {
-			setupLog.Error(err, "unable to setup baremetalpool controller")
+	if ctrlFlags.BareMetal {
+		if err := setupBareMetalControllers(mgr); err != nil {
+			setupLog.Error(err, "unable to setup baremetalpool controllers")
 			os.Exit(1)
 		}
 	}
