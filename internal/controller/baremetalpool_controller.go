@@ -21,6 +21,10 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/gophercloud/gophercloud/v2"
+	"github.com/gophercloud/gophercloud/v2/openstack"
+	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/networks"
+	"github.com/gophercloud/utils/v2/openstack/clientconfig"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -126,6 +130,12 @@ func (r *BareMetalPoolReconciler) handleUpdate(ctx context.Context, bareMetalPoo
 		return ctrl.Result{}, nil
 	}
 
+	networkName := bareMetalPool.Name + "-network"
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.createPrivateNetwork(ctx, networkName)
+	}()
+
 	if bareMetalPool.Status.HostSets == nil {
 		bareMetalPool.Status.HostSets = []v1alpha1.BareMetalHostSet{}
 	}
@@ -171,7 +181,7 @@ func (r *BareMetalPoolReconciler) handleUpdate(ctx context.Context, bareMetalPoo
 		delta := replicas - int32(len(currentHostLeases[hostType]))
 		if delta > 0 {
 			for range delta {
-				if err := r.createHostLeaseCR(ctx, bareMetalPool, hostType); err != nil {
+				if err := r.createHostLeaseCR(ctx, bareMetalPool, hostType, networkName); err != nil {
 					log.Error(err, "Failed to create HostLease CR")
 					bareMetalPool.SetStatusCondition(
 						v1alpha1.BareMetalPoolConditionTypeReady,
@@ -225,7 +235,16 @@ func (r *BareMetalPoolReconciler) handleUpdate(ctx context.Context, bareMetalPoo
 		delete(currentHostLeases, hostType)
 	}
 
-	// TODO: add profile (setup) logic
+	if err := <-errCh; err != nil {
+		log.Error(err, "Failed to create network", "networkName", networkName)
+		bareMetalPool.SetStatusCondition(
+			v1alpha1.BareMetalPoolConditionTypeReady,
+			metav1.ConditionFalse,
+			"Failed to create network",
+			v1alpha1.BareMetalPoolReasonFailed,
+		)
+		return ctrl.Result{}, err
+	}
 
 	bareMetalPool.SetStatusCondition(
 		v1alpha1.BareMetalPoolConditionTypeReady,
@@ -252,6 +271,12 @@ func (r *BareMetalPoolReconciler) handleDeletion(ctx context.Context, bareMetalP
 
 	// TODO: add profile (teardown) logic
 
+	networkName := bareMetalPool.Name + "-network"
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.deletePrivateNetwork(ctx, networkName)
+	}()
+
 	hostLeaseList := &v1alpha1.HostLeaseList{}
 	err := r.List(ctx, hostLeaseList,
 		client.InNamespace(bareMetalPool.Namespace),
@@ -262,13 +287,23 @@ func (r *BareMetalPoolReconciler) handleDeletion(ctx context.Context, bareMetalP
 		return err
 	}
 
+	// Move all HostLeases to idle-agents-network
 	for i := range hostLeaseList.Items {
 		hostLease := &hostLeaseList.Items[i]
-		if err := r.Delete(ctx, hostLease); client.IgnoreNotFound(err) != nil {
-			log.Error(err, "Failed to delete HostLease CR", "hostLease", hostLease.Name)
-			return err
+		if len(hostLease.Spec.NetworkInterfaces) > 0 &&
+			hostLease.Spec.NetworkInterfaces[0].Network != "idle-agents-network" {
+			hostLease.Spec.NetworkInterfaces[0].Network = "idle-agents-network"
+			if err := r.Update(ctx, hostLease); err != nil {
+				log.Error(err, "Failed to update HostLease network to idle-agents-network", "hostLease", hostLease.Name)
+				return err
+			}
+			log.Info("Updated HostLease network to idle-agents-network", "hostLease", hostLease.Name)
 		}
-		log.Info("Deleted HostLease CR", "hostLease", hostLease.Name)
+	}
+
+	if err := <-errCh; err != nil {
+		log.Error(err, "Failed to delete network", "networkName", networkName)
+		return err
 	}
 
 	if controllerutil.RemoveFinalizer(bareMetalPool, BareMetalPoolFinalizer) {
@@ -287,6 +322,7 @@ func (r *BareMetalPoolReconciler) createHostLeaseCR(
 	ctx context.Context,
 	bareMetalPool *v1alpha1.BareMetalPool,
 	hostType string,
+	networkName string,
 ) error {
 	log := logf.FromContext(ctx)
 
@@ -326,6 +362,11 @@ func (r *BareMetalPoolReconciler) createHostLeaseCR(
 			TemplateID:         templateID,
 			TemplateParameters: templateParameters,
 			PoweredOn:          false,
+			NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+				{
+					Network: networkName,
+				},
+			},
 		},
 	}
 	if err := controllerutil.SetControllerReference(bareMetalPool, hostLeaseCR, r.Scheme); err != nil {
@@ -353,4 +394,101 @@ func (r *BareMetalPoolReconciler) updateStatusHostSets(bareMetalPool *v1alpha1.B
 		}
 	}
 	bareMetalPool.Status.HostSets = updatedHostSets
+}
+
+func (r *BareMetalPoolReconciler) createPrivateNetwork(ctx context.Context, networkName string) error {
+	log := logf.FromContext(ctx)
+
+	// Create OpenStack client using clouds.yaml
+	clientOpts := &clientconfig.ClientOpts{
+		Cloud: "ajamias",
+	}
+
+	provider, err := clientconfig.AuthenticatedClient(ctx, clientOpts)
+	if err != nil {
+		return err
+	}
+
+	networkClient, err := openstack.NewNetworkV2(provider, gophercloud.EndpointOpts{})
+	if err != nil {
+		return err
+	}
+
+	// Check if network already exists
+	listOpts := networks.ListOpts{
+		Name: networkName,
+	}
+	allPages, err := networks.List(networkClient, listOpts).AllPages(ctx)
+	if err != nil {
+		return err
+	}
+	allNetworks, err := networks.ExtractNetworks(allPages)
+	if err != nil {
+		return err
+	}
+	if len(allNetworks) > 0 {
+		log.Info("Private network already exists", "networkName", networkName, "networkID", allNetworks[0].ID)
+		return nil
+	}
+
+	// Create the private network
+	adminStateUp := true
+	createOpts := networks.CreateOpts{
+		Name:         networkName,
+		AdminStateUp: &adminStateUp,
+	}
+	result := networks.Create(ctx, networkClient, createOpts)
+	network, err := result.Extract()
+	if err != nil {
+		return err
+	}
+
+	log.Info("Successfully created private network", "networkName", networkName, "networkID", network.ID)
+	return nil
+}
+
+func (r *BareMetalPoolReconciler) deletePrivateNetwork(ctx context.Context, networkName string) error {
+	log := logf.FromContext(ctx)
+
+	// Create OpenStack client using clouds.yaml
+	clientOpts := &clientconfig.ClientOpts{
+		Cloud: "ajamias",
+	}
+
+	provider, err := clientconfig.AuthenticatedClient(ctx, clientOpts)
+	if err != nil {
+		return err
+	}
+
+	networkClient, err := openstack.NewNetworkV2(provider, gophercloud.EndpointOpts{})
+	if err != nil {
+		return err
+	}
+
+	// Find the network by name
+	listOpts := networks.ListOpts{
+		Name: networkName,
+	}
+	allPages, err := networks.List(networkClient, listOpts).AllPages(ctx)
+	if err != nil {
+		return err
+	}
+	allNetworks, err := networks.ExtractNetworks(allPages)
+	if err != nil {
+		return err
+	}
+	if len(allNetworks) == 0 {
+		log.Info("Private network does not exist, nothing to delete", "networkName", networkName)
+		return nil
+	}
+
+	// Delete the network
+	networkID := allNetworks[0].ID
+	err = networks.Delete(ctx, networkClient, networkID).ExtractErr()
+	if err != nil {
+		return err
+	}
+
+	log.Info("Successfully deleted private network", "networkName", networkName, "networkID", networkID)
+	return nil
 }
